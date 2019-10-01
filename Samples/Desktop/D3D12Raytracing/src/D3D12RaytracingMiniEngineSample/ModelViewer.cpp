@@ -56,6 +56,9 @@
 #include "RaytracingHlslCompat.h"
 #include "ModelViewerRayTracing.h"
 
+#include <ShellScalingAPI.h>
+#pragma comment(lib, "Shcore.lib")
+
 using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
@@ -253,6 +256,9 @@ inline bool IsDirectXRaytracingSupported(IDXGIAdapter1* adapter)
 
 int wmain(int argc, wchar_t** argv)
 {
+    // disable scaling of the output window
+    SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+
 #if _DEBUG
     CComPtr<ID3D12Debug> debugInterface;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugInterface))))
@@ -279,9 +285,9 @@ int wmain(int argc, wchar_t** argv)
     }
 
     s_EnableVSync.Decrement();
-    TargetResolution = k720p;
-    g_DisplayWidth = 1280;
-    g_DisplayHeight = 720;
+    TargetResolution = k1080p;
+    g_DisplayWidth = 1920;
+    g_DisplayHeight = 1080;
     GameCore::RunApplication(D3D12RaytracingMiniEngineSample(), L"D3D12RaytracingMiniEngineSample"); 
     return 0;
 }
