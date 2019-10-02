@@ -22,7 +22,7 @@ void RayGen()
     float2 xy = DTid.xy + 0.5;
 
     // Screen position for the ray
-    float2 screenPos = xy / g_dynamic.resolution * 2.0 - 1.0;
+    float2 screenPos = xy / float2(DispatchRaysDimensions().xy) * 2.0 - 1.0;
 
     // Invert Y for DirectX-style coordinates
     screenPos.y =  -screenPos.y;

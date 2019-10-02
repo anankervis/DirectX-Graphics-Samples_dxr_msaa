@@ -52,6 +52,7 @@
 #include "CompiledShaders/DiffuseHitShaderLib.h"
 #include "CompiledShaders/RayGenerationShadowsLib.h"
 #include "CompiledShaders/MissShadowsLib.h"
+#include "CompiledShaders/BeamsLib.h"
 
 #include "RaytracingHlslCompat.h"
 #include "ModelViewerRayTracing.h"
@@ -62,6 +63,10 @@
 using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
+
+constexpr int beamSize = 2;
+BoolVar enableBeams("Application/Raytracing/EnableBeams", true);
+BoolVar enableBeamMsaa("Application/Raytracing/EnableBeamMSAA", true);
 
 extern ByteAddressBuffer   g_bvh_bottomLevelAccelerationStructure;
 ColorBuffer g_SceneNormalBuffer;
@@ -104,6 +109,7 @@ enum RaytracingTypes
     Shadows,
     DiffuseHitShader,
     Reflection,
+    Beams,
     NumTypes
 };
 
@@ -200,6 +206,7 @@ private:
     enum eObjectFilter { kOpaque = 0x1, kCutout = 0x2, kTransparent = 0x4, kAll = 0xF, kNone = 0x0 };
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat, eObjectFilter Filter = kAll );
     void RaytraceDiffuse(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget);
+    void RaytraceDiffuseBeams(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget);
     void RaytraceShadows(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget, DepthBuffer& depth);
     void RaytraceReflections(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget, DepthBuffer& depth, ColorBuffer& normals);
 
@@ -729,7 +736,18 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
         g_RaytracingInputs[DiffuseHitShader] = RaytracingDispatchRayInputs(*g_pRaytracingDevice, pDiffusePSO, pHitShaderTable.data(), shaderRecordSizeInBytes, (UINT)pHitShaderTable.size(), rayGenShaderExportName, missExportName);
     }
 
-   {
+    {
+        rayGenDxilLibSubobject = CreateDxilLibrary(rayGenShaderExportName, g_pBeamsLib, sizeof(g_pBeamsLib), rayGenDxilLibDesc, rayGenExportDesc);
+        hitGroupLibSubobject = CreateDxilLibrary(closestHitExportName, g_pBeamsLib, sizeof(g_pBeamsLib), hitGroupDxilLibDesc, hitGroupExportDesc);
+        missDxilLibSubobject = CreateDxilLibrary(missExportName, g_pBeamsLib, sizeof(g_pBeamsLib), missDxilLibDesc, missExportDesc);
+
+        CComPtr<ID3D12StateObject> pBeamsPSO;
+        g_pRaytracingDevice->CreateStateObject(&stateObject, IID_PPV_ARGS(&pBeamsPSO));
+        GetShaderTable(model, pBeamsPSO, pHitShaderTable.data());
+        g_RaytracingInputs[Beams] = RaytracingDispatchRayInputs(*g_pRaytracingDevice, pBeamsPSO, pHitShaderTable.data(), shaderRecordSizeInBytes, (UINT)pHitShaderTable.size(), rayGenShaderExportName, missExportName);
+    }
+
+    {
         rayGenDxilLibSubobject = CreateDxilLibrary(rayGenShaderExportName, g_pRayGenerationShaderSSRLib, sizeof(g_pRayGenerationShaderSSRLib), rayGenDxilLibDesc, rayGenExportDesc);
         hitGroupLibSubobject = CreateDxilLibrary(closestHitExportName, g_pDiffuseHitShaderLib, sizeof(g_pDiffuseHitShaderLib), hitGroupDxilLibDesc, hitGroupExportDesc);
         missDxilLibSubobject = CreateDxilLibrary(missExportName, g_pmissShaderLib, sizeof(g_pmissShaderLib), missDxilLibDesc, missExportDesc);
@@ -1098,6 +1116,11 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
       rayTracingMode = RTM_DIFFUSE_WITH_SHADOWRAYS;
     else if(GameInput::IsFirstPressed(GameInput::kKey_7))
       rayTracingMode = RTM_REFLECTIONS;
+
+    if (GameInput::IsFirstPressed(GameInput::kKey_b))
+        enableBeams = !enableBeams;
+    if (GameInput::IsFirstPressed(GameInput::kKey_m))
+        enableBeamMsaa = !enableBeamMsaa;
     
     static bool freezeCamera = false;
     
@@ -1652,6 +1675,61 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
 }
 
+void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
+    GraphicsContext& context,
+    const Math::Camera& camera,
+    ColorBuffer& colorTarget)
+{
+    ScopedTimer _p0(L"RaytraceDiffuseBeams", context);
+
+    // Prepare constants
+    DynamicCB inputs = g_dynamicCb;
+    auto m0 = camera.GetViewProjMatrix();
+    auto m1 = Transpose(Invert(m0));
+    memcpy(&inputs.cameraToWorld, &m1, sizeof(inputs.cameraToWorld));
+    memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
+    inputs.resolution.x = (float)colorTarget.GetWidth();
+    inputs.resolution.y = (float)colorTarget.GetHeight();
+
+    HitShaderConstants hitShaderConstants = {};
+    hitShaderConstants.sunDirection = m_SunDirection;
+    hitShaderConstants.sunLight = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+    hitShaderConstants.ambientLight = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+    hitShaderConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
+    hitShaderConstants.modelToShadow = Transpose(m_SunShadow.GetShadowMatrix());
+    hitShaderConstants.IsReflection = false;
+    hitShaderConstants.UseShadowRays = rayTracingMode == RTM_DIFFUSE_WITH_SHADOWRAYS;
+    context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
+    context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
+
+    context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    context.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(g_hitConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    context.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.FlushResourceBarriers();
+
+    ID3D12GraphicsCommandList* pCommandList = context.GetCommandList();
+
+    CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
+    pCommandList->QueryInterface(IID_PPV_ARGS(&pRaytracingCommandList));
+
+    ID3D12DescriptorHeap* pDescriptorHeaps[] = { &g_pRaytracingDescriptorHeap->GetDescriptorHeap() };
+    pRaytracingCommandList->SetDescriptorHeaps(ARRAYSIZE(pDescriptorHeaps), pDescriptorHeaps);
+
+    pCommandList->SetComputeRootSignature(g_GlobalRaytracingRootSignature);
+    pCommandList->SetComputeRootDescriptorTable(0, g_SceneSrvs);
+    pCommandList->SetComputeRootConstantBufferView(1, g_hitConstantBuffer.GetGpuVirtualAddress());
+    pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
+    pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvh_topLevelAccelerationStructure->GetGPUVirtualAddress());
+
+    D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs[Beams].GetDispatchRayDesc(
+        colorTarget.GetWidth() / beamSize, colorTarget.GetHeight() / beamSize);
+    pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs[Beams].m_pPSO);
+    pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
+}
+
 void D3D12RaytracingMiniEngineSample::RaytraceReflections(
     GraphicsContext& context,
     const Math::Camera& camera,
@@ -1726,6 +1804,7 @@ void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext
     TextContext text(gfxContext);
     text.Begin();
     text.DrawFormattedString("\nMillion Primary Rays/s: %7.3f", primaryRaysPerSec);
+    text.DrawFormattedString("\nBeams: %s Beam MSAA: %s", enableBeams ? "Y" : "N", enableBeamMsaa ? "Y" : "N");
     text.End();
 }
 
@@ -1753,7 +1832,10 @@ void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext
 
     case RTM_DIFFUSE_WITH_SHADOWMAPS:
     case RTM_DIFFUSE_WITH_SHADOWRAYS:
-        RaytraceDiffuse(gfxContext, m_Camera, g_SceneColorBuffer);
+        if (enableBeams)
+            RaytraceDiffuseBeams(gfxContext, m_Camera, g_SceneColorBuffer);
+        else
+            RaytraceDiffuse(gfxContext, m_Camera, g_SceneColorBuffer);
         break;
 
     case RTM_REFLECTIONS:

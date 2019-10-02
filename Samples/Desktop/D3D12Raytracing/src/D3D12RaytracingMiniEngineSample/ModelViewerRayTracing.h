@@ -48,7 +48,7 @@ cbuffer b1 : register(b1)
 inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 direction)
 {
     float2 xy = index + 0.5; // center in the middle of the pixel
-    float2 screenPos = xy / g_dynamic.resolution * 2.0 - 1.0;
+    float2 screenPos = xy / float2(DispatchRaysDimensions().xy) * 2.0 - 1.0;
 
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;
