@@ -54,6 +54,8 @@
 #include <ShellScalingAPI.h>
 #pragma comment(lib, "Shcore.lib")
 
+#define ALIGN(alignment, num) ((((num) + alignment - 1) / alignment) * alignment)
+
 using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
@@ -570,80 +572,57 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
     D3D12SerializeVersionedRootSignature(&localRootSignatureDesc, &pLocalRootSignatureBlob, nullptr);
     g_pRaytracingDevice->CreateRootSignature(0, pLocalRootSignatureBlob->GetBufferPointer(), pLocalRootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&g_LocalRaytracingRootSignature));
 
-    std::vector<D3D12_STATE_SUBOBJECT> subObjects;
-    D3D12_STATE_SUBOBJECT nodeMaskSubObject;
+    LPCWSTR exportName_RayGen = L"RayGen";
+    LPCWSTR exportName_Hit = L"Hit";
+    LPCWSTR exportName_Miss = L"Miss";
+    LPCWSTR exportName_HitGroup = L"HitGroup";
+
     UINT nodeMask = 1;
-    nodeMaskSubObject.pDesc = &nodeMask;
-    nodeMaskSubObject.Type = D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK;
-    subObjects.push_back(nodeMaskSubObject);
 
-    D3D12_STATE_SUBOBJECT rootSignatureSubObject;
-    rootSignatureSubObject.pDesc = &g_GlobalRaytracingRootSignature.p;
-    rootSignatureSubObject.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-    subObjects.push_back(rootSignatureSubObject);
-
-    D3D12_STATE_SUBOBJECT configurationSubObject;
     D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
     pipelineConfig.MaxTraceRecursionDepth = MaxRayRecursion;
-    configurationSubObject.pDesc = &pipelineConfig;
-    configurationSubObject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
-    subObjects.push_back(configurationSubObject);
 
-    // Ray Gen shader stuff
-    // ----------------------------------------------------------------//
-    LPCWSTR rayGenShaderExportName = L"RayGen";
-    subObjects.push_back(D3D12_STATE_SUBOBJECT{});
-    D3D12_STATE_SUBOBJECT &rayGenDxilLibSubobject = subObjects.back();
-    D3D12_EXPORT_DESC rayGenExportDesc;
-    D3D12_DXIL_LIBRARY_DESC rayGenDxilLibDesc = {};
-    rayGenDxilLibSubobject = CreateDxilLibrary(rayGenShaderExportName, g_pRaysLib, sizeof(g_pRaysLib), rayGenDxilLibDesc, rayGenExportDesc);
+    D3D12_EXPORT_DESC exportDesc_rays[] =
+    {
+        { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
+        { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
+        { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+    };
+    D3D12_DXIL_LIBRARY_DESC dxilLibDesc_rays =
+    {
+        { // DXILLibrary
+            g_pRaysLib,
+            sizeof(g_pRaysLib)
+        },
+        _countof(exportDesc_rays), // NumExports
+        exportDesc_rays // pExports
+    };
 
-    // Hit Group shader stuff
-    // ----------------------------------------------------------------//
-    LPCWSTR closestHitExportName = L"Hit";
-    D3D12_EXPORT_DESC hitGroupExportDesc;
-    D3D12_DXIL_LIBRARY_DESC hitGroupDxilLibDesc = {};
-    D3D12_STATE_SUBOBJECT hitGroupLibSubobject = CreateDxilLibrary(closestHitExportName, g_pRaysLib, sizeof(g_pRaysLib), hitGroupDxilLibDesc, hitGroupExportDesc);
-    subObjects.push_back(hitGroupLibSubobject);
+    D3D12_EXPORT_DESC exportDesc_beams[] =
+    {
+        { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
+        { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
+        { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+    };
+    D3D12_DXIL_LIBRARY_DESC dxilLibDesc_beams =
+    {
+        { // DXILLibrary
+            g_pBeamsLib,
+            sizeof(g_pBeamsLib)
+        },
+        _countof(exportDesc_beams), // NumExports
+        exportDesc_beams // pExports
+    };
 
-    LPCWSTR missExportName = L"Miss";
-    D3D12_EXPORT_DESC missExportDesc;
-    D3D12_DXIL_LIBRARY_DESC missDxilLibDesc = {};
-    D3D12_STATE_SUBOBJECT missLibSubobject = CreateDxilLibrary(missExportName, g_pRaysLib, sizeof(g_pRaysLib), missDxilLibDesc, missExportDesc);
-    subObjects.push_back(missLibSubobject);
-    D3D12_STATE_SUBOBJECT &missDxilLibSubobject = subObjects.back();
-
-    D3D12_STATE_SUBOBJECT shaderConfigStateObject;
     D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
     shaderConfig.MaxAttributeSizeInBytes = 8;
     shaderConfig.MaxPayloadSizeInBytes = 8;
-    shaderConfigStateObject.pDesc = &shaderConfig;
-    shaderConfigStateObject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
-    subObjects.push_back(shaderConfigStateObject);
-    D3D12_STATE_SUBOBJECT &shaderConfigSubobject = subObjects.back();
 
-    LPCWSTR hitGroupExportName = L"HitGroup";
     D3D12_HIT_GROUP_DESC hitGroupDesc = {};
-    hitGroupDesc.ClosestHitShaderImport = closestHitExportName;
-    hitGroupDesc.HitGroupExport = hitGroupExportName;
-    D3D12_STATE_SUBOBJECT hitGroupSubobject = {};
-    hitGroupSubobject.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
-    hitGroupSubobject.pDesc = &hitGroupDesc;
-    subObjects.push_back(hitGroupSubobject);
-
-    D3D12_STATE_SUBOBJECT localRootSignatureSubObject;
-    localRootSignatureSubObject.pDesc = &g_LocalRaytracingRootSignature.p;
-    localRootSignatureSubObject.Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
-    subObjects.push_back(localRootSignatureSubObject);
-    D3D12_STATE_SUBOBJECT &rootSignatureSubobject = subObjects.back();
-
-    D3D12_STATE_OBJECT_DESC stateObject;
-    stateObject.NumSubobjects = (UINT)subObjects.size();
-    stateObject.pSubobjects = subObjects.data();
-    stateObject.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
+    hitGroupDesc.HitGroupExport = exportName_HitGroup;
 
     const UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-#define ALIGN(alignment, num) ((((num) + alignment - 1) / alignment) * alignment)
     const UINT offsetToDescriptorHandle = ALIGN(sizeof(D3D12_GPU_DESCRIPTOR_HANDLE), shaderIdentifierSize);
     const UINT offsetToMaterialConstants = ALIGN(sizeof(UINT32), offsetToDescriptorHandle + sizeof(D3D12_GPU_DESCRIPTOR_HANDLE));
     const UINT shaderRecordSizeInBytes = ALIGN(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, offsetToMaterialConstants + sizeof(MaterialRootConstant));
@@ -653,7 +632,7 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
     {
         ID3D12StateObjectProperties* stateObjectProperties = nullptr;
         ThrowIfFailed(pPSO->QueryInterface(IID_PPV_ARGS(&stateObjectProperties)));
-        void *pHitGroupIdentifierData = stateObjectProperties->GetShaderIdentifier(hitGroupExportName);
+        void *pHitGroupIdentifierData = stateObjectProperties->GetShaderIdentifier(exportName_HitGroup);
         for (UINT i = 0; i < numMeshes; i++)
         {
             byte *pShaderRecord = i * shaderRecordSizeInBytes + pShaderTable;
@@ -670,34 +649,66 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
 
     // ray shaders
     {
-        rayGenDxilLibSubobject = CreateDxilLibrary(rayGenShaderExportName, g_pRaysLib, sizeof(g_pRaysLib), rayGenDxilLibDesc, rayGenExportDesc);
-        hitGroupLibSubobject = CreateDxilLibrary(closestHitExportName, g_pRaysLib, sizeof(g_pRaysLib), hitGroupDxilLibDesc, hitGroupExportDesc);
-        missDxilLibSubobject = CreateDxilLibrary(missExportName, g_pRaysLib, sizeof(g_pRaysLib), missDxilLibDesc, missExportDesc);
+        D3D12_STATE_SUBOBJECT stateSubobjects[] =
+        {
+            { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
+            { D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &g_GlobalRaytracingRootSignature.p },
+            { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
+            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc_rays },
+            { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
+            { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
+        };
+        D3D12_STATE_OBJECT_DESC stateObjectDesc =
+        {
+            D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE,
+            _countof(stateSubobjects),
+            stateSubobjects
+        };
 
         CComPtr<ID3D12StateObject> pDiffusePSO;
-        g_pRaytracingDevice->CreateStateObject(&stateObject, IID_PPV_ARGS(&pDiffusePSO));
+        g_pRaytracingDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&pDiffusePSO));
         GetShaderTable(model, pDiffusePSO, pHitShaderTable.data());
-        g_RaytracingInputs_Ray = RaytracingDispatchRayInputs(*g_pRaytracingDevice, pDiffusePSO, pHitShaderTable.data(), shaderRecordSizeInBytes, (UINT)pHitShaderTable.size(), rayGenShaderExportName, missExportName);
+        g_RaytracingInputs_Ray = RaytracingDispatchRayInputs(
+            *g_pRaytracingDevice, pDiffusePSO, pHitShaderTable.data(), shaderRecordSizeInBytes,
+            (UINT)pHitShaderTable.size(), exportName_RayGen, exportName_Miss);
 
         WCHAR hitGroupExportNameClosestHitType[64];
-        swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", hitGroupExportName);
-        SetPipelineStateStackSize(rayGenShaderExportName, hitGroupExportNameClosestHitType, missExportName, MaxRayRecursion, g_RaytracingInputs_Ray.m_pPSO);
+        swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
+        SetPipelineStateStackSize(
+            exportName_RayGen, hitGroupExportNameClosestHitType, exportName_Miss, MaxRayRecursion, g_RaytracingInputs_Ray.m_pPSO);
     }
 
     // beam shaders
     {
-         rayGenDxilLibSubobject = CreateDxilLibrary(rayGenShaderExportName, g_pBeamsLib, sizeof(g_pBeamsLib), rayGenDxilLibDesc, rayGenExportDesc);
-         hitGroupLibSubobject = CreateDxilLibrary(closestHitExportName, g_pBeamsLib, sizeof(g_pBeamsLib), hitGroupDxilLibDesc, hitGroupExportDesc);
-         missDxilLibSubobject = CreateDxilLibrary(missExportName, g_pBeamsLib, sizeof(g_pBeamsLib), missDxilLibDesc, missExportDesc);
-    
-         CComPtr<ID3D12StateObject> pBeamsPSO;
-         g_pRaytracingDevice->CreateStateObject(&stateObject, IID_PPV_ARGS(&pBeamsPSO));
-         GetShaderTable(model, pBeamsPSO, pHitShaderTable.data());
-         g_RaytracingInputs_Beam = RaytracingDispatchRayInputs(*g_pRaytracingDevice, pBeamsPSO, pHitShaderTable.data(), shaderRecordSizeInBytes, (UINT)pHitShaderTable.size(), rayGenShaderExportName, missExportName);
+        D3D12_STATE_SUBOBJECT stateSubobjects[] =
+        {
+            { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
+            { D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &g_GlobalRaytracingRootSignature.p },
+            { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
+            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc_beams },
+            { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
+            { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
+        };
+        D3D12_STATE_OBJECT_DESC stateObjectDesc =
+        {
+            D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE,
+            _countof(stateSubobjects),
+            stateSubobjects
+        };
 
-         WCHAR hitGroupExportNameClosestHitType[64];
-         swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", hitGroupExportName);
-         SetPipelineStateStackSize(rayGenShaderExportName, hitGroupExportNameClosestHitType, missExportName, MaxRayRecursion, g_RaytracingInputs_Beam.m_pPSO);
+        CComPtr<ID3D12StateObject> pBeamsPSO;
+        g_pRaytracingDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&pBeamsPSO));
+        GetShaderTable(model, pBeamsPSO, pHitShaderTable.data());
+        g_RaytracingInputs_Beam = RaytracingDispatchRayInputs(
+            *g_pRaytracingDevice, pBeamsPSO, pHitShaderTable.data(), shaderRecordSizeInBytes,
+            (UINT)pHitShaderTable.size(), exportName_RayGen, exportName_Miss);
+
+        WCHAR hitGroupExportNameClosestHitType[64];
+        swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
+        SetPipelineStateStackSize(
+            exportName_RayGen, hitGroupExportNameClosestHitType, exportName_Miss, MaxRayRecursion, g_RaytracingInputs_Beam.m_pPSO);
     }
 }
 
