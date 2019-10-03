@@ -13,7 +13,7 @@
 //
 // Thanks to Michal Drobot for his feedback.
 
-#include "ModelViewerRS.hlsli"
+#include "ModelViewerRS.h"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)

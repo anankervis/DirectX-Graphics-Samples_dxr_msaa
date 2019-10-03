@@ -44,8 +44,8 @@
 #include "CompiledShaders/BeamsLib.h"
 #include "CompiledShaders/RaysLib.h"
 
-#include "RaytracingHlslCompat.h"
-#include "ModelViewerRayTracing.h"
+#include "Shaders/RaytracingHlslCompat.h"
+#include "Shaders/ModelViewerRayTracing.h"
 
 #include <ShellScalingAPI.h>
 #pragma comment(lib, "Shcore.lib")
@@ -1017,7 +1017,6 @@ void D3D12RaytracingMiniEngineSample::RenderObjects(GraphicsContext& gfxContext,
         gfxContext.DrawIndexed(indexCount, startIndex, baseVertex);
     }
 }
-
 
 void D3D12RaytracingMiniEngineSample::SetCameraToPredefinedPosition(int cameraPosition) 
 {

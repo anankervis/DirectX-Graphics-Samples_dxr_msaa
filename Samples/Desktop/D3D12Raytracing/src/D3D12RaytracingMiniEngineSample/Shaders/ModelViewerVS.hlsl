@@ -12,7 +12,7 @@
 //             Alex Nankervis
 //
 
-#include "ModelViewerRS.hlsli"
+#include "ModelViewerRS.h"
 
 cbuffer VSConstants : register(b0)
 {

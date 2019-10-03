@@ -153,17 +153,16 @@
     </None>
     <None Include="packages.config" />
     <None Include="readme.md" />
-    <None Include="Shaders\ModelViewerRS.hlsli" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="BeamsLib.hlsl">
+    <FxCompile Include="Shaders\BeamsLib.hlsl">
       <ShaderType>Library</ShaderType>
       <ShaderModel>6.3</ShaderModel>
       <EntryPointName>
       </EntryPointName>
       <AdditionalOptions> -HV 2017 -Zpr </AdditionalOptions>
     </FxCompile>
-    <FxCompile Include="RaysLib.hlsl">
+    <FxCompile Include="Shaders\RaysLib.hlsl">
       <ShaderType>Library</ShaderType>
       <ShaderModel>6.3</ShaderModel>
       <EntryPointName>
@@ -179,8 +178,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DXSampleHelper.h" />
-    <ClInclude Include="ModelViewerRayTracing.h" />
-    <ClInclude Include="RayTracingHlslCompat.h" />
+    <ClInclude Include="Shaders\HlslCompat.h" />
+    <ClInclude Include="Shaders\ModelViewerRayTracing.h" />
+    <ClInclude Include="Shaders\ModelViewerRS.h" />
+    <ClInclude Include="Shaders\RayTracingHlslCompat.h" />
+    <ClInclude Include="Shaders\Shading.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\..\MiniEngine\Core\Core_VS16.vcxproj">
