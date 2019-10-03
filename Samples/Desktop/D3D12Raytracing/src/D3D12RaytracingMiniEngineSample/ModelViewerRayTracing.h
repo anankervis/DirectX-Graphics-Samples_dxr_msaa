@@ -35,7 +35,6 @@ cbuffer HitShaderConstants : register(b0)
     float3 SunColor;
     float3 AmbientColor;
     float4 ShadowTexelSize;
-    float4x4 ModelToShadow;
 }
 
 cbuffer b1 : register(b1)

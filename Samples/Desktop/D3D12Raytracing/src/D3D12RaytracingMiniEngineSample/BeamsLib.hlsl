@@ -23,15 +23,10 @@ cbuffer Material : register(b3)
 StructuredBuffer<RayTraceMeshInfo> g_meshInfo : register(t1);
 ByteAddressBuffer g_indices : register(t2);
 ByteAddressBuffer g_attributes : register(t3);
-Texture2D<float> texShadow : register(t4);
-Texture2D<float> texSSAO : register(t5);
 SamplerState      g_s0 : register(s0);
-SamplerComparisonState shadowSampler : register(s1);
 
 Texture2D<float4> g_localTexture : register(t6);
 Texture2D<float4> g_localNormal : register(t7);
-
-Texture2D<float4>   normals  : register(t13);
 
 uint3 Load3x16BitIndices(
     uint offsetBytes)
@@ -56,27 +51,6 @@ uint3 Load3x16BitIndices(
     }
 
     return indices;
-}
-
-float GetShadow(float3 ShadowCoord)
-{
-    const float Dilation = 2.0;
-    float d1 = Dilation * ShadowTexelSize.x * 0.125;
-    float d2 = Dilation * ShadowTexelSize.x * 0.875;
-    float d3 = Dilation * ShadowTexelSize.x * 0.625;
-    float d4 = Dilation * ShadowTexelSize.x * 0.375;
-    float result = (
-        2.0 * texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy, ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d2, d1), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d1, -d2), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d2, -d1), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d1, d2), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d4, d3), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(-d3, -d4), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d4, -d3), ShadowCoord.z) +
-        texShadow.SampleCmpLevelZero(shadowSampler, ShadowCoord.xy + float2(d3, d4), ShadowCoord.z)
-        ) / 10.0;
-    return result * result;
 }
 
 float2 GetUVAttribute(uint byteOffset)
@@ -145,18 +119,18 @@ bool Inverse2x2(float2x2 mat, out float2x2 inverse)
 
 
 /* TODO: Could be precalculated per triangle
- Using implementation described in PBRT, finding the partial derivative of the (change in position)/(change in UV coordinates)
- a.k.a dp/du and dp/dv
+Using implementation described in PBRT, finding the partial derivative of the (change in position)/(change in UV coordinates)
+a.k.a dp/du and dp/dv
 
- Given the 3 UV and 3 triangle points, this can be represented as a linear equation:
+Given the 3 UV and 3 triangle points, this can be represented as a linear equation:
 
- (uv0.u - uv2.u, uv0.v - uv2.v)   (dp/du)   =     (p0 - p2)
- (uv1.u - uv2.u, uv1.v - uv2.v)   (dp/dv)   =     (p1 - p2)
+(uv0.u - uv2.u, uv0.v - uv2.v)   (dp/du)   =     (p0 - p2)
+(uv1.u - uv2.u, uv1.v - uv2.v)   (dp/dv)   =     (p1 - p2)
 
- To solve for dp/du, we invert the 2x2 matrix on the left side to get
+To solve for dp/du, we invert the 2x2 matrix on the left side to get
 
- (dp/du)   = (uv0.u - uv2.u, uv0.v - uv2.v)^-1  (p0 - p2)
- (dp/dv)   = (uv1.u - uv2.u, uv1.v - uv2.v)     (p1 - p2)
+(dp/du)   = (uv0.u - uv2.u, uv0.v - uv2.v)^-1  (p0 - p2)
+(dp/dv)   = (uv1.u - uv2.u, uv1.v - uv2.v)     (p1 - p2)
 */
 void CalculateTrianglePartialDerivatives(float2 uv0, float2 uv1, float2 uv2, float3 p0, float3 p1, float3 p2, out float3 dpdu, out float3 dpdv)
 {
@@ -295,12 +269,10 @@ void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes att
         normal = normalize(mul(normal, tbn));
     }
 
-    float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy];
+    float ssao = 1.0f;
+    float3 outputColor = AmbientColor * diffuseColor * ssao;
 
-    // TODO: This could be pre-calculated once per vertex if this mul per pixel was a concern
-    float4 shadowCoord = mul(ModelToShadow, float4(worldPosition, 1.0f));
-    float shadow = GetShadow(shadowCoord.xyz);
-
+    float shadow = 1.0f;
     outputColor += shadow * ApplyLightCommon(
         diffuseColor,
         specularAlbedo,

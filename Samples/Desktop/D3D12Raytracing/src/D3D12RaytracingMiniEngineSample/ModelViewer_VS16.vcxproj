@@ -82,7 +82,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="ForwardPlusLighting.cpp" />
     <ClCompile Include="ModelViewer.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -154,8 +153,6 @@
     </None>
     <None Include="packages.config" />
     <None Include="readme.md" />
-    <None Include="Shaders\FillLightGridCS.hlsli" />
-    <None Include="Shaders\LightGrid.hlsli" />
     <None Include="Shaders\ModelViewerRS.hlsli" />
   </ItemGroup>
   <ItemGroup>
@@ -173,29 +170,15 @@
       </EntryPointName>
       <AdditionalOptions> -HV 2017 -Zpr </AdditionalOptions>
     </FxCompile>
-    <FxCompile Include="Shaders\DepthViewerPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\DepthViewerVS.hlsl">
-      <ShaderType>Vertex</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Shaders\FillLightGridCS_16.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_24.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_32.hlsl" />
-    <FxCompile Include="Shaders\FillLightGridCS_8.hlsl" />
     <FxCompile Include="Shaders\ModelViewerPS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="Shaders\ModelViewerVS.hlsl">
       <ShaderType>Vertex</ShaderType>
     </FxCompile>
-    <FxCompile Include="Shaders\WaveTileCountPS.hlsl">
-      <ShaderType>Pixel</ShaderType>
-    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DXSampleHelper.h" />
-    <ClInclude Include="ForwardPlusLighting.h" />
     <ClInclude Include="ModelViewerRayTracing.h" />
     <ClInclude Include="RayTracingHlslCompat.h" />
   </ItemGroup>
