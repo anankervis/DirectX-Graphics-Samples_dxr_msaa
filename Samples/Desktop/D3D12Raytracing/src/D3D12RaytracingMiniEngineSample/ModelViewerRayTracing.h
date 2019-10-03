@@ -36,8 +36,6 @@ cbuffer HitShaderConstants : register(b0)
     float3 AmbientColor;
     float4 ShadowTexelSize;
     float4x4 ModelToShadow;
-    uint IsReflection;
-    uint UseShadowRays;
 }
 
 cbuffer b1 : register(b1)

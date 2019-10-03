@@ -145,9 +145,9 @@ bool Inverse2x2(float2x2 mat, out float2x2 inverse)
 
 
 /* TODO: Could be precalculated per triangle
- Using implementation described in PBRT, finding the partial derivative of the (change in position)/(change in UV coordinates) 
+ Using implementation described in PBRT, finding the partial derivative of the (change in position)/(change in UV coordinates)
  a.k.a dp/du and dp/dv
- 
+
  Given the 3 UV and 3 triangle points, this can be represented as a linear equation:
 
  (uv0.u - uv2.u, uv0.v - uv2.v)   (dp/du)   =     (p0 - p2)
@@ -222,12 +222,6 @@ void CalculateUVDerivatives(float3 normal, float3 dpdu, float3 dpdv, float3 p, f
 [shader("closesthit")]
 void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
-    payload.RayHitT = RayTCurrent();
-    if (payload.SkipShading)
-    {
-        return;
-    }
-
     uint materialID = MaterialID;
     uint triangleID = PrimitiveIndex();
 
@@ -245,7 +239,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     const float3 normal1 = asfloat(g_attributes.Load3(info.m_normalAttributeOffsetBytes + ii.y * info.m_attributeStrideBytes));
     const float3 normal2 = asfloat(g_attributes.Load3(info.m_normalAttributeOffsetBytes + ii.z * info.m_attributeStrideBytes));
     float3 vsNormal = normalize(normal0 * bary.x + normal1 * bary.y + normal2 * bary.z);
-    
+
     const float3 tangent0 = asfloat(g_attributes.Load3(info.m_tangentAttributeOffsetBytes + ii.x * info.m_attributeStrideBytes));
     const float3 tangent1 = asfloat(g_attributes.Load3(info.m_tangentAttributeOffsetBytes + ii.y * info.m_attributeStrideBytes));
     const float3 tangent2 = asfloat(g_attributes.Load3(info.m_tangentAttributeOffsetBytes + ii.z * info.m_attributeStrideBytes));
@@ -279,7 +273,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     CalculateTrianglePartialDerivatives(uv0, uv1, uv2, p0, p1, p2, dpdu, dpdv);
     float2 ddx, ddy;
     CalculateUVDerivatives(triangleNormal, dpdu, dpdv, worldPosition, xOffsetPoint, yOffsetPoint, ddx, ddy);
-    
+
     const float3 viewDir = normalize(-WorldRayDirection());
     uint materialInstanceId = info.m_materialInstanceId;
 
@@ -294,35 +288,14 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
         normal = normalize(mul(normal, tbn));
     }
-    
+
     float3 outputColor = AmbientColor * diffuseColor * texSSAO[DispatchRaysIndex().xy];
 
-    float shadow = 1.0;
-    if (UseShadowRays)
-    {
-        float3 shadowDirection = SunDirection;
-        float3 shadowOrigin = worldPosition;
-        RayDesc rayDesc = { shadowOrigin,
-            0.1f,
-            shadowDirection,
-            FLT_MAX };
-        RayPayload shadowPayload;
-        shadowPayload.SkipShading = true;
-        shadowPayload.RayHitT = FLT_MAX;
-        TraceRay(g_accel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,~0,0,1,0,rayDesc,shadowPayload);
-        if (shadowPayload.RayHitT < FLT_MAX)
-        {
-            shadow = 0.0;
-        }
-    }
-    else
-    {
-        // TODO: This could be pre-calculated once per vertex if this mul per pixel was a concern
-        float4 shadowCoord = mul(ModelToShadow, float4(worldPosition, 1.0f));
-        shadow = GetShadow(shadowCoord.xyz);
-    }
-    
-    outputColor +=  shadow * ApplyLightCommon(
+    // TODO: This could be pre-calculated once per vertex if this mul per pixel was a concern
+    float4 shadowCoord = mul(ModelToShadow, float4(worldPosition, 1.0f));
+    float shadow = GetShadow(shadowCoord.xyz);
+
+    outputColor += shadow * ApplyLightCommon(
         diffuseColor,
         specularAlbedo,
         specularMask,
@@ -332,12 +305,30 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         SunDirection,
         SunColor);
 
-    // TODO: Should be passed in via material info
-    if (IsReflection)
-    {
-        float reflectivity = normals[DispatchRaysIndex().xy].w;
-        outputColor = g_screenOutput[DispatchRaysIndex().xy].rgb + reflectivity * outputColor;
-    }
-
     g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
+}
+
+[shader("miss")]
+void Miss(inout RayPayload payload)
+{
+    g_screenOutput[DispatchRaysIndex().xy] = float4(0, 0, 0, 1);
+}
+
+[shader("raygeneration")]
+void RayGen()
+{
+    float3 origin, direction;
+    GenerateCameraRay(DispatchRaysIndex().xy, origin, direction);
+
+    RayDesc rayDesc =
+    {
+        origin,
+        0.0f,
+        direction,
+        FLT_MAX
+    };
+
+    RayPayload payload;
+
+    TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
 }
