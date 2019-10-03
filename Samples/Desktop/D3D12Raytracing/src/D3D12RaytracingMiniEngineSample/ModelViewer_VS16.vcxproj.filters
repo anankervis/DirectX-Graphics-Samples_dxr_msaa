@@ -22,16 +22,13 @@
     <ClInclude Include="Shaders\ModelViewerRS.h">
       <Filter>Shaders</Filter>
     </ClInclude>
-    <ClInclude Include="Shaders\RayTracingHlslCompat.h">
-      <Filter>Shaders</Filter>
-    </ClInclude>
     <ClInclude Include="Shaders\Shading.h">
       <Filter>Shaders</Filter>
     </ClInclude>
     <ClInclude Include="Shaders\HlslCompat.h">
       <Filter>Shaders</Filter>
     </ClInclude>
-    <ClInclude Include="Shaders\ModelViewerRayTracing.h">
+    <ClInclude Include="Shaders\RayCommon.h">
       <Filter>Shaders</Filter>
     </ClInclude>
   </ItemGroup>

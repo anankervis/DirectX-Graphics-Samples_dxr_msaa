@@ -14,6 +14,7 @@
 // Thanks to Michal Drobot for his feedback.
 
 #include "ModelViewerRS.h"
+#include "Shading.h"
 
 // outdated warning about for-loop variable scope
 #pragma warning (disable: 3078)
@@ -47,78 +48,6 @@ cbuffer PSConstants : register(b0)
 
 SamplerState sampler0 : register(s0);
 
-void AntiAliasSpecular(inout float3 texNormal, inout float gloss)
-{
-    float normalLenSq = dot(texNormal, texNormal);
-    float invNormalLen = rsqrt(normalLenSq);
-    texNormal *= invNormalLen;
-    gloss = lerp(1, gloss, rcp(invNormalLen));
-}
-
-// Apply fresnel to modulate the specular albedo
-void FSchlick(inout float3 specular, inout float3 diffuse, float3 lightDir, float3 halfVec)
-{
-    float fresnel = pow(1.0 - saturate(dot(lightDir, halfVec)), 5.0);
-    specular = lerp(specular, 1, fresnel);
-    diffuse = lerp(diffuse, 0, fresnel);
-}
-
-float3 ApplyAmbientLight(
-    float3    diffuse,    // Diffuse albedo
-    float    ao,            // Pre-computed ambient-occlusion
-    float3    lightColor    // Radiance of ambient light
-)
-{
-    return ao * diffuse * lightColor;
-}
-
-float3 ApplyLightCommon(
-    float3    diffuseColor,    // Diffuse albedo
-    float3    specularColor,    // Specular albedo
-    float    specularMask,    // Where is it shiny or dingy?
-    float    gloss,            // Specular power
-    float3    normal,            // World-space normal
-    float3    viewDir,        // World-space vector from eye to point
-    float3    lightDir,        // World-space vector from point to light
-    float3    lightColor        // Radiance of directional light
-)
-{
-    float3 halfVec = normalize(lightDir - viewDir);
-    float nDotH = saturate(dot(halfVec, normal));
-
-    FSchlick(diffuseColor, specularColor, lightDir, halfVec);
-
-    float specularFactor = specularMask * pow(nDotH, gloss) * (gloss + 2) / 8;
-
-    float nDotL = saturate(dot(normal, lightDir));
-
-    return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
-}
-
-float3 ApplyDirectionalLight(
-    float3    diffuseColor,    // Diffuse albedo
-    float3    specularColor,    // Specular albedo
-    float    specularMask,    // Where is it shiny or dingy?
-    float    gloss,            // Specular power
-    float3    normal,            // World-space normal
-    float3    viewDir,        // World-space vector from eye to point
-    float3    lightDir,        // World-space vector from point to light
-    float3    lightColor        // Radiance of directional light
-)
-{
-    float shadow = 1.0f;
-    return shadow * ApplyLightCommon(
-        diffuseColor,
-        specularColor,
-        specularMask,
-        gloss,
-        normal,
-        viewDir,
-        lightDir,
-        lightColor
-    );
-}
-
 struct MRT
 {
     float3 Color : SV_Target0;
@@ -136,8 +65,8 @@ MRT main(VSOutput vsOutput)
     float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
     float3 colorSum = 0;
     {
-        float ao = 1.0f;
-        colorSum += ApplyAmbientLight(diffuseAlbedo, ao, AmbientColor);
+        float ssao = 1.0f;
+        colorSum += AmbientColor * diffuseAlbedo * ssao;
     }
 
     float gloss = 128.0;
@@ -161,7 +90,17 @@ MRT main(VSOutput vsOutput)
     float3 specularAlbedo = float3(0.56, 0.56, 0.56);
     float specularMask = SAMPLE_TEX(texSpecular).g;
     float3 viewDir = normalize(vsOutput.viewDir);
-    colorSum += ApplyDirectionalLight(diffuseAlbedo, specularAlbedo, specularMask, gloss, normal, viewDir, SunDirection, SunColor);
+
+    float shadow = 1.0f;
+    colorSum += shadow * ApplyLightCommon(
+        diffuseAlbedo,
+        specularAlbedo,
+        specularMask,
+        gloss,
+        normal,
+        viewDir,
+        SunDirection,
+        SunColor);
 
     mrt.Color = colorSum;
 

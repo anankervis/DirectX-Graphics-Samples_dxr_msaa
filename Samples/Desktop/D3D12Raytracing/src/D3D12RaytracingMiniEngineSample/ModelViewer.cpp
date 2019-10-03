@@ -44,8 +44,7 @@
 #include "CompiledShaders/BeamsLib.h"
 #include "CompiledShaders/RaysLib.h"
 
-#include "Shaders/RaytracingHlslCompat.h"
-#include "Shaders/ModelViewerRayTracing.h"
+#include "Shaders/RayCommon.h"
 
 #include <ShellScalingAPI.h>
 #pragma comment(lib, "Shcore.lib")

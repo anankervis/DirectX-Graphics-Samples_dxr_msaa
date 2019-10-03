@@ -179,9 +179,8 @@
   <ItemGroup>
     <ClInclude Include="DXSampleHelper.h" />
     <ClInclude Include="Shaders\HlslCompat.h" />
-    <ClInclude Include="Shaders\ModelViewerRayTracing.h" />
+    <ClInclude Include="Shaders\RayCommon.h" />
     <ClInclude Include="Shaders\ModelViewerRS.h" />
-    <ClInclude Include="Shaders\RayTracingHlslCompat.h" />
     <ClInclude Include="Shaders\Shading.h" />
   </ItemGroup>
   <ItemGroup>
