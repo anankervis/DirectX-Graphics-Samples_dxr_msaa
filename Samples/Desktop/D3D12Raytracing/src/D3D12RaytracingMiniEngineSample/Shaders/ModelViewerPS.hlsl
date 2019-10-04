@@ -57,57 +57,23 @@ struct MRT
 MRT main(VSOutput vsOutput)
 {
     MRT mrt;
-    mrt.Color = 0.0;
-
-    uint2 pixelPos = uint2(vsOutput.position.xy);
-# define SAMPLE_TEX(texName) texName.Sample(sampler0, vsOutput.uv)
-
-    float3 diffuseAlbedo = SAMPLE_TEX(texDiffuse);
-    float3 colorSum = 0;
-    {
-        float ssao = 1.0f;
-        colorSum += AmbientColor * diffuseAlbedo * ssao;
-    }
 
     float gloss = 128.0;
-    float3 normal;
-    {
-        normal = SAMPLE_TEX(texNormal) * 2.0 - 1.0;
-        AntiAliasSpecular(normal, gloss);
-        float3x3 tbn = float3x3(normalize(vsOutput.tangent), normalize(vsOutput.bitangent), normalize(vsOutput.normal));
-        normal = mul(normal, tbn);
+    float3 normal = texNormal.Sample(sampler0, vsOutput.uv) * 2.0 - 1.0;
+    AntiAliasSpecular(normal, gloss);
+    float3x3 tbn = float3x3(normalize(vsOutput.tangent), normalize(vsOutput.bitangent), normalize(vsOutput.normal));
+    normal = normalize(mul(normal, tbn));
 
-        // Normalize result...
-        float lenSq = dot(normal, normal);
-
-        // Some Sponza content appears to have no tangent space provided, resulting in degenerate normal vectors.
-        if (!isfinite(lenSq) || lenSq < 1e-6)
-            return mrt;
-
-        normal *= rsqrt(lenSq);
-    }
-
-    float3 specularAlbedo = float3(0.56, 0.56, 0.56);
-    float specularMask = SAMPLE_TEX(texSpecular).g;
-    float3 viewDir = normalize(vsOutput.viewDir);
-
-    float shadow = 1.0f;
-    colorSum += shadow * ApplyLightCommon(
-        diffuseAlbedo,
-        specularAlbedo,
-        specularMask,
+    mrt.Color = Shade(
+        texDiffuse.Sample(sampler0, vsOutput.uv),
+        AmbientColor,
+        float3(0.56, 0.56, 0.56),
+        texSpecular.Sample(sampler0, vsOutput.uv).g,
         gloss,
         normal,
-        viewDir,
+        normalize(vsOutput.viewDir),
         SunDirection,
         SunColor);
 
-    mrt.Color = colorSum;
-
     return mrt;
 }
-
-
-#undef POINT_LIGHT_PARAMS
-#undef SPOT_LIGHT_PARAMS
-#undef SHADOWED_LIGHT_PARAMS

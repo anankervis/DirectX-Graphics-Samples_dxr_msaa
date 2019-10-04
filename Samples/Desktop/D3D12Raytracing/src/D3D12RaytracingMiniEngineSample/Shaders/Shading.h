@@ -16,14 +16,14 @@ void FSchlick(inout float3 specular, inout float3 diffuse, float3 lightDir, floa
 }
 
 float3 ApplyLightCommon(
-    float3    diffuseColor,    // Diffuse albedo
-    float3    specularColor,    // Specular albedo
-    float    specularMask,    // Where is it shiny or dingy?
-    float    gloss,            // Specular power
-    float3    normal,            // World-space normal
-    float3    viewDir,        // World-space vector from eye to point
-    float3    lightDir,        // World-space vector from point to light
-    float3    lightColor        // Radiance of directional light
+    float3    diffuseColor,  // Diffuse albedo
+    float3    specularColor, // Specular albedo
+    float     specularMask,  // Where is it shiny or dingy?
+    float     gloss,         // Specular power
+    float3    normal,        // World-space normal
+    float3    viewDir,       // World-space vector from eye to point
+    float3    lightDir,      // World-space vector from point to light
+    float3    lightColor     // Radiance of directional light
 )
 {
     float3 halfVec = normalize(lightDir - viewDir);
@@ -36,4 +36,35 @@ float3 ApplyLightCommon(
     float nDotL = saturate(dot(normal, lightDir));
 
     return nDotL * lightColor * (diffuseColor + specularFactor * specularColor);
+}
+
+float3 Shade(
+    float3    diffuseColor,  
+    float3    ambientColor,
+    float3    specularColor, 
+    float     specularMask,  
+    float     gloss,         
+    float3    normal,        
+    float3    viewDir,       
+    float3    lightDir,      
+    float3    lightColor     
+)
+{
+    float3 colorSum = 0;
+
+    float ssao = 1.0f;
+    colorSum += ambientColor * diffuseColor * ssao;
+
+    float shadow = 1.0f;
+    colorSum += shadow * ApplyLightCommon(
+        diffuseColor,
+        specularColor,
+        specularMask,
+        gloss,
+        normal,
+        viewDir,
+        lightDir,
+        lightColor);
+
+    return colorSum;
 }

@@ -81,24 +81,18 @@ void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes att
     uint materialInstanceId = info.m_materialInstanceId;
 
     const float3 diffuseColor = g_localTexture.SampleGrad(g_s0, uv, ddx, ddy).rgb;
-    float3 normal;
-    float3 specularAlbedo = float3(0.56, 0.56, 0.56);
     float specularMask = 0;     // TODO: read the texture
+
     float gloss = 128.0;
-    {
-        normal = g_localNormal.SampleGrad(g_s0, uv, ddx, ddy).rgb * 2.0 - 1.0;
-        AntiAliasSpecular(normal, gloss);
-        float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
-        normal = normalize(mul(normal, tbn));
-    }
+    float3 normal = g_localNormal.SampleGrad(g_s0, uv, ddx, ddy).rgb * 2.0 - 1.0;
+    AntiAliasSpecular(normal, gloss);
+    float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
+    normal = normalize(mul(normal, tbn));
 
-    float ssao = 1.0f;
-    float3 outputColor = AmbientColor * diffuseColor * ssao;
-
-    float shadow = 1.0f;
-    outputColor += shadow * ApplyLightCommon(
+    float3 outputColor = Shade(
         diffuseColor,
-        specularAlbedo,
+        AmbientColor,
+        float3(0.56, 0.56, 0.56),
         specularMask,
         gloss,
         normal,
