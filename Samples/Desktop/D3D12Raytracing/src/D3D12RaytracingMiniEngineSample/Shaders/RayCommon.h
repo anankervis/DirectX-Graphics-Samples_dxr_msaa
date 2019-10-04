@@ -4,6 +4,8 @@
 # include "HlslCompat.h"
 #endif
 
+#define BEAM_SIZE 8
+
 struct RayTraceMeshInfo
 {
     uint  m_indexOffsetBytes;
@@ -25,6 +27,21 @@ struct DynamicCB
     float2   resolution;
 };
 
+struct RootConstants
+{
+    uint materialID;
+};
+
+struct RayPayload
+{
+    uint pad;
+};
+
+struct BeamPayload
+{
+    uint pad;
+};
+
 #ifdef HLSL
 
 # ifndef SINGLE
@@ -42,22 +59,14 @@ SamplerState      g_s0 : register(s0);
 
 RWTexture2D<float4> g_screenOutput : register(u2);
 
-cbuffer HitShaderConstants : register(b0)
-{
-    float3 SunDirection;
-    float3 SunColor;
-    float3 AmbientColor;
-    float4 ShadowTexelSize;
-};
-
 cbuffer b1 : register(b1)
 {
-    DynamicCB g_dynamic;
+    DynamicCB dynamicConstants;
 };
 
-cbuffer Material : register(b3)
+cbuffer b3 : register(b3)
 {
-    uint MaterialID;
+    RootConstants rootConstants;
 };
 
 uint3 Load3x16BitIndices(
@@ -99,9 +108,9 @@ inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 directi
     screenPos.y = -screenPos.y;
 
     // Unproject into a ray
-    float4 unprojected = mul(g_dynamic.cameraToWorld, float4(screenPos, 0, 1));
+    float4 unprojected = mul(dynamicConstants.cameraToWorld, float4(screenPos, 0, 1));
     float3 world = unprojected.xyz / unprojected.w;
-    origin = g_dynamic.worldCameraPosition;
+    origin = dynamicConstants.worldCameraPosition;
     direction = normalize(world - origin);
 }
 

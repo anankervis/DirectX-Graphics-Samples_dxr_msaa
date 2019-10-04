@@ -1,5 +1,6 @@
-#ifndef HLSL_COMPAT_H_INCLUDED
-#define HLSL_COMPAT_H_INCLUDED
+#pragma once
+
+#include "Math/Vector.h"
 
 #define OUTPARAM(type, name)    type& name
 #define INOUTPARAM(type, name)    type& name
@@ -11,7 +12,11 @@ struct float2
 
 struct float3
 {
-    float   x, y, z;
+    float   x, y, z, _padW;
+
+    float3() {}
+    float3(float x, float y, float z) : x(x), y(y), z(z) {}
+    float3(const Vector3 &v) : x(v.GetX()), y(v.GetY()), z(v.GetZ()) {}
 };
 
 struct float4
@@ -110,5 +115,3 @@ float3 cross(float3 a, float3 b)
         a.x * b.y - a.y * b.x
     };
 }
-
-#endif // HLSL_COMPAT_H_INCLUDED

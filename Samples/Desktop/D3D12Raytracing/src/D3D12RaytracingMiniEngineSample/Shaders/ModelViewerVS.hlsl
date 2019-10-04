@@ -12,6 +12,8 @@
 //             Alex Nankervis
 //
 
+#define HLSL
+
 #include "ModelViewerRS.h"
 
 cbuffer VSConstants : register(b0)

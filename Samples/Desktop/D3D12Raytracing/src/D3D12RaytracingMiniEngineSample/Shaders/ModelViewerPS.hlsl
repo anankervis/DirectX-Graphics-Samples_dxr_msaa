@@ -13,6 +13,8 @@
 //
 // Thanks to Michal Drobot for his feedback.
 
+#define HLSL
+
 #include "ModelViewerRS.h"
 #include "Shading.h"
 
@@ -39,11 +41,9 @@ Texture2D<float3> texNormal            : register(t3);
 //Texture2D<float4> texLightmap        : register(t4);
 //Texture2D<float4> texReflection    : register(t5);
 
-cbuffer PSConstants : register(b0)
+cbuffer b0 : register(b0)
 {
-    float3 SunDirection;
-    float3 SunColor;
-    float3 AmbientColor;
+    ShadeConstants shadeConstants;
 }
 
 SamplerState sampler0 : register(s0);
@@ -66,14 +66,14 @@ MRT main(VSOutput vsOutput)
 
     mrt.Color = Shade(
         texDiffuse.Sample(sampler0, vsOutput.uv),
-        AmbientColor,
+        shadeConstants.ambientColor,
         float3(0.56, 0.56, 0.56),
         texSpecular.Sample(sampler0, vsOutput.uv).g,
         gloss,
         normal,
         normalize(vsOutput.viewDir),
-        SunDirection,
-        SunColor);
+        shadeConstants.sunDirection,
+        shadeConstants.sunColor);
 
     return mrt;
 }

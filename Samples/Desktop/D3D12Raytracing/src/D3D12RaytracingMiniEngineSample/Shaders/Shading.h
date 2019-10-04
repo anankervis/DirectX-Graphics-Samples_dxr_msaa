@@ -1,3 +1,23 @@
+#pragma once
+
+#ifndef HLSL
+# include "HlslCompat.h"
+#endif
+
+#ifdef HLSL
+# define STRUCT_ALIGN(x)
+#else
+# define STRUCT_ALIGN(x) __declspec(align(x))
+#endif
+
+STRUCT_ALIGN(16) struct ShadeConstants
+{
+    float3 sunDirection;
+    float3 sunColor;
+    float3 ambientColor;
+};
+
+#ifdef HLSL
 
 void AntiAliasSpecular(inout float3 texNormal, inout float gloss)
 {
@@ -68,3 +88,5 @@ float3 Shade(
 
     return colorSum;
 }
+
+#endif

@@ -16,16 +16,15 @@
 #include "RayCommon.h"
 #include "Shading.h"
 
-struct BeamPayload
+cbuffer b0 : register(b0)
 {
-    uint pad0;
-    uint pad1;
+    ShadeConstants shadeConstants;
 };
 
 [shader("closesthit")]
 void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
-    uint materialID = MaterialID;
+    uint materialID = rootConstants.materialID;
     uint triangleID = PrimitiveIndex();
 
     RayTraceMeshInfo info = g_meshInfo[materialID];
@@ -91,16 +90,30 @@ void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes att
 
     float3 outputColor = Shade(
         diffuseColor,
-        AmbientColor,
+        shadeConstants.ambientColor,
         float3(0.56, 0.56, 0.56),
         specularMask,
         gloss,
         normal,
         viewDir,
-        SunDirection,
-        SunColor);
+        shadeConstants.sunDirection,
+        shadeConstants.sunColor);
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
+}
+
+/*
+Record the triangle and move on. We'll compute coverage later.
+
+Yes, it would be nice to have per-sample coverage auto-generated and fed into this function...
+...but how would that work with beams?
+
+Single-pixel rays w/ MSAA can be treated as a collection of 2, 4, 8, 16 subrays w/ coverage mask.
+Beams represent the conservative volume, which may be a collection of pixels or a spatial query.
+*/
+[shader("anyhit")]
+void AnyHit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+{
 }
 
 [shader("miss")]
@@ -126,4 +139,20 @@ void RayGen()
     BeamPayload payload;
 
     TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+}
+
+/*
+Convert beam triangle list to quads of triangleID + coverage mask
+*/
+[numthreads(BEAM_SIZE, BEAM_SIZE, 1)]
+[RootSignature(
+    "UAV(u2)"
+)]
+void BeamTrisToQuads(
+    uint groupIndex : SV_GroupIndex,
+    uint3 groupThreadID : SV_GroupThreadID,
+    uint3 groupID : SV_GroupID,
+    uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    g_screenOutput[dispatchThreadID.xy] = float4(0, 1, 0, 1);
 }

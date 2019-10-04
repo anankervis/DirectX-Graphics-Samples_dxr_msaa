@@ -42,9 +42,11 @@
 #include "CompiledShaders/ModelViewerVS.h"
 #include "CompiledShaders/ModelViewerPS.h"
 #include "CompiledShaders/BeamsLib.h"
+#include "CompiledShaders/BeamsShadeQuads.h"
 #include "CompiledShaders/RaysLib.h"
 
 #include "Shaders/RayCommon.h"
+#include "Shaders/Shading.h"
 
 #include <ShellScalingAPI.h>
 #pragma comment(lib, "Shcore.lib")
@@ -55,22 +57,13 @@ using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
 
-constexpr int beamSize = 8;
 BoolVar enableMsaa("Application/Raytracing/enableMsaa", true);
 
 extern ByteAddressBuffer   g_bvh_bottomLevelAccelerationStructure;
 
 CComPtr<ID3D12Device5> g_pRaytracingDevice;
 
-__declspec(align(16)) struct HitShaderConstants
-{
-    Vector3 sunDirection;
-    Vector3 sunLight;
-    Vector3 ambientLight;
-    float ShadowTexelSize[4];
-};
-
-ByteAddressBuffer          g_hitConstantBuffer;
+ByteAddressBuffer          g_shadeConstantBuffer;
 ByteAddressBuffer          g_dynamicConstantBuffer;
 
 D3D12_GPU_DESCRIPTOR_HANDLE g_GpuSceneMaterialSrvs[27];
@@ -87,6 +80,9 @@ CComPtr<ID3D12Resource>   g_bvh_topLevelAccelerationStructure;
 DynamicCB           g_dynamicCb;
 CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
 CComPtr<ID3D12RootSignature> g_LocalRaytracingRootSignature;
+
+RootSignature g_BeamPostRootSig;
+ComputePSO g_BeamShadeQuadsPSO;
 
 enum class RenderMode
 {
@@ -529,7 +525,7 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
     localTextureDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
 
     CD3DX12_ROOT_PARAMETER1 localRootSignatureParameters[2];
-    UINT sizeOfRootConstantInDwords = (sizeof(MaterialRootConstant) - 1) / sizeof(DWORD) + 1;
+    UINT sizeOfRootConstantInDwords = (sizeof(RootConstants) + sizeof(uint32_t) - 1) / sizeof(uint32_t);
     localRootSignatureParameters[0].InitAsDescriptorTable(1, &localTextureDescriptorRange);
     localRootSignatureParameters[1].InitAsConstants(sizeOfRootConstantInDwords, 3);
     auto localRootSignatureDesc = CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC(_countof(localRootSignatureParameters), localRootSignatureParameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE);
@@ -547,42 +543,6 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
 
     D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
     pipelineConfig.MaxTraceRecursionDepth = MaxRayRecursion;
-
-    D3D12_EXPORT_DESC exportDesc_rays[] =
-    {
-        { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
-        { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
-        { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
-    };
-    D3D12_DXIL_LIBRARY_DESC dxilLibDesc_rays =
-    {
-        { // DXILLibrary
-            g_pRaysLib,
-            sizeof(g_pRaysLib)
-        },
-        _countof(exportDesc_rays), // NumExports
-        exportDesc_rays // pExports
-    };
-
-    D3D12_EXPORT_DESC exportDesc_beams[] =
-    {
-        { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
-        { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
-        { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
-    };
-    D3D12_DXIL_LIBRARY_DESC dxilLibDesc_beams =
-    {
-        { // DXILLibrary
-            g_pBeamsLib,
-            sizeof(g_pBeamsLib)
-        },
-        _countof(exportDesc_beams), // NumExports
-        exportDesc_beams // pExports
-    };
-
-    D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
-    shaderConfig.MaxAttributeSizeInBytes = 8;
-    shaderConfig.MaxPayloadSizeInBytes = 8;
 
     D3D12_HIT_GROUP_DESC hitGroupDesc = {};
     hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
@@ -615,12 +575,32 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
 
     // ray shaders
     {
+        D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
+        shaderConfig.MaxAttributeSizeInBytes = 8;
+        shaderConfig.MaxPayloadSizeInBytes = sizeof(RayPayload);
+
+        D3D12_EXPORT_DESC exportDesc[] =
+        {
+            { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+        };
+        D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
+        {
+            { // DXILLibrary
+                g_pRaysLib,
+                sizeof(g_pRaysLib)
+            },
+            _countof(exportDesc), // NumExports
+            exportDesc // pExports
+        };
+
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
             { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
             { D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &g_GlobalRaytracingRootSignature.p },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
-            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc_rays },
+            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
             { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
@@ -647,12 +627,32 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
 
     // beam shaders
     {
+        D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
+        shaderConfig.MaxAttributeSizeInBytes = 8;
+        shaderConfig.MaxPayloadSizeInBytes = sizeof(BeamPayload);
+
+        D3D12_EXPORT_DESC exportDesc[] =
+        {
+            { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+        };
+        D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
+        {
+            { // DXILLibrary
+                g_pBeamsLib,
+                sizeof(g_pBeamsLib)
+            },
+            _countof(exportDesc), // NumExports
+            exportDesc // pExports
+        };
+
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
             { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
             { D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &g_GlobalRaytracingRootSignature.p },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
-            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc_beams },
+            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
             { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
@@ -676,6 +676,46 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
         SetPipelineStateStackSize(
             exportName_RayGen, hitGroupExportNameClosestHitType, exportName_Miss, MaxRayRecursion, g_RaytracingInputs_Beam.m_pPSO);
     }
+
+    // beam post processing shaders
+    {
+        D3D12_EXPORT_DESC exportDesc[] =
+        {
+            { L"ShadeQuads", nullptr, D3D12_EXPORT_FLAG_NONE },
+        };
+        D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
+        {
+            { // DXILLibrary
+                g_pBeamsLib,
+                sizeof(g_pBeamsLib)
+            },
+            _countof(exportDesc), // NumExports
+            exportDesc // pExports
+        };
+
+        D3D12_STATE_SUBOBJECT stateSubobjects[] =
+        {
+            { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
+            { D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &g_GlobalRaytracingRootSignature.p },
+            { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc },
+            { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
+        };
+        D3D12_STATE_OBJECT_DESC stateObjectDesc =
+        {
+            D3D12_STATE_OBJECT_TYPE_COLLECTION,
+            _countof(stateSubobjects),
+            stateSubobjects
+        };
+
+        g_BeamPostRootSig.Reset(4, 1);
+        g_BeamPostRootSig[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 1, D3D12_SHADER_VISIBILITY_ALL);
+        g_BeamPostRootSig.Finalize(L"D3D12RaytracingMiniEngineSample");
+
+        g_BeamShadeQuadsPSO.SetRootSignature(g_BeamPostRootSig);
+        // looks like I need to split my compute shaders out into separate files
+        g_BeamShadeQuadsPSO.SetComputeShader(g_pBeamsShadeQuads, sizeof(g_pBeamsShadeQuads));
+        g_BeamShadeQuadsPSO.Finalize();
+    }
 }
 
 void D3D12RaytracingMiniEngineSample::Startup( void )
@@ -691,15 +731,12 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     SamplerDesc DefaultSamplerDesc;
     DefaultSamplerDesc.MaxAnisotropy = 8;
 
-    m_RootSig.Reset(6, 2);
+    m_RootSig.Reset(4, 1);
     m_RootSig.InitStaticSampler(0, DefaultSamplerDesc, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig.InitStaticSampler(1, SamplerShadowDesc, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[0].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 6, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 64, 6, D3D12_SHADER_VISIBILITY_PIXEL);
-    m_RootSig[4].InitAsConstants(1, 2, D3D12_SHADER_VISIBILITY_VERTEX);
-    m_RootSig[5].InitAsConstants(1, 1, D3D12_SHADER_VISIBILITY_PIXEL);
+    m_RootSig[3].InitAsConstants(1, 2, D3D12_SHADER_VISIBILITY_VERTEX);
     m_RootSig.Finalize(L"D3D12RaytracingMiniEngineSample", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     D3D12_INPUT_ELEMENT_DESC vertElem[] =
@@ -730,7 +767,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     ASSERT(bModelLoadSuccess, "Failed to load model");
     ASSERT(m_Model.m_Header.meshCount > 0, "Model contains no meshes");
 
-    g_hitConstantBuffer.Create(L"Hit Constant Buffer", 1, sizeof(HitShaderConstants));
+    g_shadeConstantBuffer.Create(L"Hit Constant Buffer", 1, sizeof(ShadeConstants));
     g_dynamicConstantBuffer.Create(L"Dynamic Constant Buffer", 1, sizeof(DynamicCB));
 
     InitializeSceneInfo(m_Model);
@@ -1042,16 +1079,10 @@ void D3D12RaytracingMiniEngineSample::RenderScene()
 
     uint32_t FrameIndex = TemporalEffects::GetFrameIndexMod2();
 
-    __declspec(align(16)) struct
-    {
-        Vector3 sunDirection;
-        Vector3 sunLight;
-        Vector3 ambientLight;
-    } psConstants;
-
-    psConstants.sunDirection = m_SunDirection;
-    psConstants.sunLight = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
-    psConstants.ambientLight = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+    ShadeConstants shadeConstants = {};
+    shadeConstants.sunDirection = m_SunDirection;
+    shadeConstants.sunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+    shadeConstants.ambientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
 
     // Set the default state for command lists
     auto& pfnSetupGraphicsState = [&](void)
@@ -1079,7 +1110,7 @@ void D3D12RaytracingMiniEngineSample::RenderScene()
         {
             ScopedTimer _prof(L"Render Color - Geo", gfxContext);
 
-            gfxContext.SetDynamicConstantBufferView(1, sizeof(psConstants), &psConstants);
+            gfxContext.SetDynamicConstantBufferView(1, sizeof(shadeConstants), &shadeConstants);
 
             D3D12_CPU_DESCRIPTOR_HANDLE rtvs[]{ g_SceneColorBuffer.GetRTV() };
             gfxContext.SetRenderTargets(_countof(rtvs), rtvs, g_SceneDepthBuffer.GetDSV());
@@ -1111,17 +1142,16 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     inputs.resolution.x = (float)colorTarget.GetWidth();
     inputs.resolution.y = (float)colorTarget.GetHeight();
 
-    HitShaderConstants hitShaderConstants = {};
-    hitShaderConstants.sunDirection = m_SunDirection;
-    hitShaderConstants.sunLight = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
-    hitShaderConstants.ambientLight = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
-    hitShaderConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-    context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
+    ShadeConstants shadeConstants = {};
+    shadeConstants.sunDirection = m_SunDirection;
+    shadeConstants.sunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+    shadeConstants.ambientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+    context.WriteBuffer(g_shadeConstantBuffer, 0, &shadeConstants, sizeof(shadeConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(g_hitConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.FlushResourceBarriers();
@@ -1136,7 +1166,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
 
     pCommandList->SetComputeRootSignature(g_GlobalRaytracingRootSignature);
     pCommandList->SetComputeRootDescriptorTable(0, g_SceneSrvs);
-    pCommandList->SetComputeRootConstantBufferView(1, g_hitConstantBuffer.GetGpuVirtualAddress());
+    pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvh_topLevelAccelerationStructure->GetGPUVirtualAddress());
@@ -1162,17 +1192,16 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
     inputs.resolution.x = (float)colorTarget.GetWidth();
     inputs.resolution.y = (float)colorTarget.GetHeight();
 
-    HitShaderConstants hitShaderConstants = {};
-    hitShaderConstants.sunDirection = m_SunDirection;
-    hitShaderConstants.sunLight = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
-    hitShaderConstants.ambientLight = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
-    hitShaderConstants.ShadowTexelSize[0] = 1.0f / g_ShadowBuffer.GetWidth();
-    context.WriteBuffer(g_hitConstantBuffer, 0, &hitShaderConstants, sizeof(hitShaderConstants));
+    ShadeConstants shadeConstants = {};
+    shadeConstants.sunDirection = m_SunDirection;
+    shadeConstants.sunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
+    shadeConstants.ambientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
+    context.WriteBuffer(g_shadeConstantBuffer, 0, &shadeConstants, sizeof(shadeConstants));
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    context.TransitionResource(g_hitConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+    context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_ShadowBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.FlushResourceBarriers();
@@ -1187,15 +1216,21 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
 
     pCommandList->SetComputeRootSignature(g_GlobalRaytracingRootSignature);
     pCommandList->SetComputeRootDescriptorTable(0, g_SceneSrvs);
-    pCommandList->SetComputeRootConstantBufferView(1, g_hitConstantBuffer.GetGpuVirtualAddress());
+    pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvh_topLevelAccelerationStructure->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(
-        colorTarget.GetWidth() / beamSize, colorTarget.GetHeight() / beamSize);
+        colorTarget.GetWidth() / BEAM_SIZE, colorTarget.GetHeight() / BEAM_SIZE);
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Beam.m_pPSO);
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
+
+    // shade quads
+    pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
+    pRaytracingCommandList->SetComputeRootDescriptorTable(0, g_OutputUAV);
+    pRaytracingCommandList->SetPipelineState(g_BeamShadeQuadsPSO.GetPipelineStateObject());
+    pRaytracingCommandList->Dispatch...
 }
 
 void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext)

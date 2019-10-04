@@ -16,16 +16,15 @@
 #include "RayCommon.h"
 #include "Shading.h"
 
-struct RayPayload
+cbuffer b0 : register(b0)
 {
-    bool SkipShading;
-    float RayHitT;
+    ShadeConstants shadeConstants;
 };
 
 [shader("closesthit")]
 void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
-    uint materialID = MaterialID;
+    uint materialID = rootConstants.materialID;
     uint triangleID = PrimitiveIndex();
 
     RayTraceMeshInfo info = g_meshInfo[materialID];
@@ -91,14 +90,14 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 
     float3 outputColor = Shade(
         diffuseColor,
-        AmbientColor,
+        shadeConstants.ambientColor,
         float3(0.56, 0.56, 0.56),
         specularMask,
         gloss,
         normal,
         viewDir,
-        SunDirection,
-        SunColor);
+        shadeConstants.sunDirection,
+        shadeConstants.sunColor);
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
 }
