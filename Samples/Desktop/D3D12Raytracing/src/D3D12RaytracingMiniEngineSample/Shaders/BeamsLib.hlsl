@@ -25,7 +25,6 @@ cbuffer b0 : register(b0)
 void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
     uint materialID = rootConstants.materialID;
-    uint triangleID = PrimitiveIndex();
 
     RayTraceMeshInfo info = g_meshInfo[materialID];
 

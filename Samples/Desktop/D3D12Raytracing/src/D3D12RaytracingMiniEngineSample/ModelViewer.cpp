@@ -72,9 +72,16 @@ D3D12_GPU_DESCRIPTOR_HANDLE g_OutputUAV;
 D3D12_GPU_DESCRIPTOR_HANDLE g_DepthAndNormalsTable;
 D3D12_GPU_DESCRIPTOR_HANDLE g_SceneSrvs;
 
+// we only need a single bottom-level BVH
 constexpr uint32_t bvhBottomCount = 1;
-CComPtr<ID3D12Resource> g_bvhBottom;
-CComPtr<ID3D12Resource> g_bvhTop;
+
+struct BVH
+{
+    CComPtr<ID3D12Resource> top;
+    CComPtr<ID3D12Resource> bottom;
+};
+BVH g_bvhTriangles;
+BVH g_bvhAABBs;
 
 DynamicCB           g_dynamicCb;
 CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
@@ -171,23 +178,25 @@ struct MaterialRootConstant
 
 D3D12_CPU_DESCRIPTOR_HANDLE g_bvh_attributeSrvs[34];
 
-class D3D12RaytracingMiniEngineSample : public GameCore::IGameApp
+class DxrMsaaDemo : public GameCore::IGameApp
 {
 public:
 
-    D3D12RaytracingMiniEngineSample( void ) {}
+    DxrMsaaDemo() {}
 
-    virtual void Startup( void ) override;
-    virtual void Cleanup( void ) override;
+    virtual void Startup() override;
+    virtual void Cleanup() override;
 
     virtual void Update( float deltaT ) override;
-    virtual void RenderScene( void ) override;
+    virtual void RenderScene() override;
     virtual void RenderUI(class GraphicsContext&) override;
     virtual void Raytrace(class GraphicsContext&);
 
     void SetCameraToPredefinedPosition(int cameraPosition);
 
 private:
+
+    void createBvh(const Model &model, BVH &bvh, bool triangles);
 
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat);
     void RaytraceDiffuse(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget);
@@ -264,7 +273,7 @@ int wmain(int argc, wchar_t** argv)
     TargetResolution = k1080p;
     g_DisplayWidth = 1920;
     g_DisplayHeight = 1080;
-    GameCore::RunApplication(D3D12RaytracingMiniEngineSample(), L"D3D12RaytracingMiniEngineSample"); 
+    GameCore::RunApplication(DxrMsaaDemo(), L"DxrMsaaDemo"); 
     return 0;
 }
 
@@ -709,7 +718,128 @@ void InitializeRaytracingStateObjects(const Model &model)
     }
 }
 
-void D3D12RaytracingMiniEngineSample::Startup( void )
+void DxrMsaaDemo::createBvh(const Model &model, BVH &bvh, bool triangles)
+{
+    uint32_t meshCount = m_Model.m_Header.meshCount;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC topDesc = {};
+    topDesc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    topDesc.Inputs.NumDescs = bvhBottomCount;
+    topDesc.Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+    topDesc.Inputs.pGeometryDescs = nullptr;
+    topDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topPrebuildInfo;
+    g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topDesc.Inputs, &topPrebuildInfo);
+
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc(meshCount);
+    for (uint32_t m = 0; m < meshCount; m++)
+    {
+        const Model::Mesh &mesh = m_Model.m_pMesh[m];
+
+        if (triangles)
+        {
+            geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+            geoDesc[m].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+            geoDesc[m].Triangles.VertexCount = mesh.vertexCount;
+            geoDesc[m].Triangles.VertexBuffer.StartAddress = m_Model.m_VertexBuffer.GetGpuVirtualAddress()
+                + mesh.vertexDataByteOffset + mesh.attrib[Model::attrib_position].offset;
+            geoDesc[m].Triangles.IndexBuffer = m_Model.m_IndexBuffer.GetGpuVirtualAddress() + mesh.indexDataByteOffset;
+            geoDesc[m].Triangles.VertexBuffer.StrideInBytes = mesh.vertexStride;
+            geoDesc[m].Triangles.IndexCount = mesh.indexCount;
+            geoDesc[m].Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+            geoDesc[m].Triangles.Transform3x4 = 0;
+        }
+        else
+        {
+            geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+            geoDesc[m].AABBs.AABBCount = mesh.indexCount / 3;
+// TODO: create and upload per-triangle AABB buffers...
+// ... as a perf improvement, it might make sense to sense to do two tris per AABB and have the Intersection shader loop,
+// but I can probably punt on that for this demo. Or until I benchmark and optimize.
+            geoDesc[m].AABBs.AABBs.StartAddress =
+            geoDesc[m].AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+        }
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomDesc = {};
+    bottomDesc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    bottomDesc.Inputs.NumDescs = meshCount;
+    bottomDesc.Inputs.pGeometryDescs = geoDesc.data();
+    bottomDesc.Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+    bottomDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomPrebuildInfo;
+    g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&bottomDesc.Inputs, &bottomPrebuildInfo);
+
+    uint64_t scratchBufferSizeNeeded = std::max(bottomPrebuildInfo.ScratchDataSizeInBytes, topPrebuildInfo.ScratchDataSizeInBytes);
+
+    ByteAddressBuffer scratchBuffer;
+    scratchBuffer.Create(L"Acceleration Structure Scratch Buffer", (uint32_t)scratchBufferSizeNeeded, 1);
+
+    D3D12_HEAP_PROPERTIES defaultHeapDesc = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    auto topLevelDesc = CD3DX12_RESOURCE_DESC::Buffer(topPrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    g_Device->CreateCommittedResource(
+        &defaultHeapDesc,
+        D3D12_HEAP_FLAG_NONE,
+        &topLevelDesc,
+        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+        nullptr,
+        IID_PPV_ARGS(&bvh.top));
+    topDesc.DestAccelerationStructureData = bvh.top->GetGPUVirtualAddress();
+    topDesc.ScratchAccelerationStructureData = scratchBuffer.GetGpuVirtualAddress();
+
+    D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
+    auto bottomLevelDesc = CD3DX12_RESOURCE_DESC::Buffer(bottomPrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    g_Device->CreateCommittedResource(
+        &defaultHeapDesc,
+        D3D12_HEAP_FLAG_NONE, 
+        &bottomLevelDesc, 
+        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+        nullptr, 
+        IID_PPV_ARGS(&bvh.bottom));
+    bottomDesc.DestAccelerationStructureData = bvh.bottom->GetGPUVirtualAddress();
+    bottomDesc.ScratchAccelerationStructureData = scratchBuffer.GetGpuVirtualAddress();
+
+    // Identity matrix
+    ZeroMemory(instanceDesc.Transform, sizeof(instanceDesc.Transform));
+    instanceDesc.Transform[0][0] = 1.0f;
+    instanceDesc.Transform[1][1] = 1.0f;
+    instanceDesc.Transform[2][2] = 1.0f;
+    instanceDesc.AccelerationStructure = bvh.bottom->GetGPUVirtualAddress();
+    instanceDesc.Flags = 0;
+    instanceDesc.InstanceID = 0;
+    instanceDesc.InstanceMask = 1;
+    instanceDesc.InstanceContributionToHitGroupIndex = 0;
+
+    ByteAddressBuffer instanceDataBuffer;
+    instanceDataBuffer.Create(L"Instance Data Buffer", bvhBottomCount, sizeof(D3D12_RAYTRACING_INSTANCE_DESC), &instanceDesc);
+    topDesc.Inputs.InstanceDescs = instanceDataBuffer.GetGpuVirtualAddress();
+    topDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+    // build the acceleration structures
+    {
+        GraphicsContext &gfxContext = GraphicsContext::Begin(L"Create Acceleration Structure");
+        ID3D12GraphicsCommandList *pCommandList = gfxContext.GetCommandList();
+
+        CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
+        pCommandList->QueryInterface(IID_PPV_ARGS(&pRaytracingCommandList));
+
+        ID3D12DescriptorHeap *descriptorHeaps[] = { &g_pRaytracingDescriptorHeap->GetDescriptorHeap() };
+        pRaytracingCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+
+        auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+        pRaytracingCommandList->BuildRaytracingAccelerationStructure(&bottomDesc, 0, nullptr);
+        pCommandList->ResourceBarrier(1, &uavBarrier);
+
+        pRaytracingCommandList->BuildRaytracingAccelerationStructure(&topDesc, 0, nullptr);
+
+        gfxContext.Finish(true);
+    }
+}
+
+void DxrMsaaDemo::Startup()
 {
     ThrowIfFailed(g_Device->QueryInterface(IID_PPV_ARGS(&g_pRaytracingDevice)), L"Couldn't get DirectX Raytracing interface for the device.\n");
 
@@ -728,7 +858,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     m_RootSig[1].InitAsConstantBuffer(0, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0, 6, D3D12_SHADER_VISIBILITY_PIXEL);
     m_RootSig[3].InitAsConstants(1, 2, D3D12_SHADER_VISIBILITY_VERTEX);
-    m_RootSig.Finalize(L"D3D12RaytracingMiniEngineSample", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+    m_RootSig.Finalize(L"DxrMsaaDemo", D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     D3D12_INPUT_ELEMENT_DESC vertElem[] =
     {
@@ -764,111 +894,8 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     InitializeSceneInfo(m_Model);
     InitializeViews(m_Model);
 
-    uint32_t meshCount = m_Model.m_Header.meshCount;
-
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC topDesc = {};
-    topDesc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
-    topDesc.Inputs.NumDescs = bvhBottomCount;
-    topDesc.Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    topDesc.Inputs.pGeometryDescs = nullptr;
-    topDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topPrebuildInfo;
-    g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topDesc.Inputs, &topPrebuildInfo);
-    
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc(meshCount);
-    for (uint32_t m = 0; m < meshCount; m++)
-    {
-        const Model::Mesh &mesh = m_Model.m_pMesh[m];
-
-        geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-        geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-        geoDesc[m].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-        geoDesc[m].Triangles.VertexCount = mesh.vertexCount;
-        geoDesc[m].Triangles.VertexBuffer.StartAddress = m_Model.m_VertexBuffer.GetGpuVirtualAddress()
-            + mesh.vertexDataByteOffset + mesh.attrib[Model::attrib_position].offset;
-        geoDesc[m].Triangles.IndexBuffer = m_Model.m_IndexBuffer.GetGpuVirtualAddress() + mesh.indexDataByteOffset;
-        geoDesc[m].Triangles.VertexBuffer.StrideInBytes = mesh.vertexStride;
-        geoDesc[m].Triangles.IndexCount = mesh.indexCount;
-        geoDesc[m].Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
-        geoDesc[m].Triangles.Transform3x4 = 0;
-    }
-
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomDesc = {};
-    bottomDesc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-    bottomDesc.Inputs.NumDescs = meshCount;
-    bottomDesc.Inputs.pGeometryDescs = geoDesc.data();
-    bottomDesc.Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    bottomDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-
-    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomPrebuildInfo;
-    g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&bottomDesc.Inputs, &bottomPrebuildInfo);
-
-    uint64_t scratchBufferSizeNeeded = std::max(bottomPrebuildInfo.ScratchDataSizeInBytes, topPrebuildInfo.ScratchDataSizeInBytes);
-
-    ByteAddressBuffer scratchBuffer;
-    scratchBuffer.Create(L"Acceleration Structure Scratch Buffer", (uint32_t)scratchBufferSizeNeeded, 1);
-
-    D3D12_HEAP_PROPERTIES defaultHeapDesc = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto topLevelDesc = CD3DX12_RESOURCE_DESC::Buffer(topPrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    g_Device->CreateCommittedResource(
-        &defaultHeapDesc,
-        D3D12_HEAP_FLAG_NONE,
-        &topLevelDesc,
-        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-        nullptr,
-        IID_PPV_ARGS(&g_bvhTop));
-    topDesc.DestAccelerationStructureData = g_bvhTop->GetGPUVirtualAddress();
-    topDesc.ScratchAccelerationStructureData = scratchBuffer.GetGpuVirtualAddress();
-
-    D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
-    auto bottomLevelDesc = CD3DX12_RESOURCE_DESC::Buffer(bottomPrebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    g_Device->CreateCommittedResource(
-        &defaultHeapDesc,
-        D3D12_HEAP_FLAG_NONE, 
-        &bottomLevelDesc, 
-        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-        nullptr, 
-        IID_PPV_ARGS(&g_bvhBottom));
-    bottomDesc.DestAccelerationStructureData = g_bvhBottom->GetGPUVirtualAddress();
-    bottomDesc.ScratchAccelerationStructureData = scratchBuffer.GetGpuVirtualAddress();
-
-    //UINT descriptorIndex = g_pRaytracingDescriptorHeap->AllocateBufferUav(*g_bvhBottom);
- 
-    // Identity matrix
-    ZeroMemory(instanceDesc.Transform, sizeof(instanceDesc.Transform));
-    instanceDesc.Transform[0][0] = 1.0f;
-    instanceDesc.Transform[1][1] = 1.0f;
-    instanceDesc.Transform[2][2] = 1.0f;
-    instanceDesc.AccelerationStructure = g_bvhBottom->GetGPUVirtualAddress();
-    instanceDesc.Flags = 0;
-    instanceDesc.InstanceID = 0;
-    instanceDesc.InstanceMask = 1;
-    instanceDesc.InstanceContributionToHitGroupIndex = 0;
-
-    ByteAddressBuffer instanceDataBuffer;
-    instanceDataBuffer.Create(L"Instance Data Buffer", bvhBottomCount, sizeof(D3D12_RAYTRACING_INSTANCE_DESC), &instanceDesc);
-    topDesc.Inputs.InstanceDescs = instanceDataBuffer.GetGpuVirtualAddress();
-    topDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-
-    // build the acceleration structures
-    {
-        GraphicsContext &gfxContext = GraphicsContext::Begin(L"Create Acceleration Structure");
-        ID3D12GraphicsCommandList *pCommandList = gfxContext.GetCommandList();
-
-        CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
-        pCommandList->QueryInterface(IID_PPV_ARGS(&pRaytracingCommandList));
-
-        ID3D12DescriptorHeap *descriptorHeaps[] = { &g_pRaytracingDescriptorHeap->GetDescriptorHeap() };
-        pRaytracingCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-
-        auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
-        pRaytracingCommandList->BuildRaytracingAccelerationStructure(&bottomDesc, 0, nullptr);
-        pCommandList->ResourceBarrier(1, &uavBarrier);
-
-        pRaytracingCommandList->BuildRaytracingAccelerationStructure(&topDesc, 0, nullptr);
-    
-        gfxContext.Finish(true);
-    }
+    createBvh(m_Model, g_bvhTriangles, true);
+    createBvh(m_Model, g_bvhAABBs, false);
 
     InitializeRaytracingStateObjects(m_Model);
 
@@ -915,7 +942,7 @@ void D3D12RaytracingMiniEngineSample::Startup( void )
     SSAO::Enable = false;
 }
 
-void D3D12RaytracingMiniEngineSample::Cleanup( void )
+void DxrMsaaDemo::Cleanup()
 {
     m_Model.Clear();
 }
@@ -925,7 +952,7 @@ namespace Graphics
     extern EnumVar DebugZoom;
 }
 
-void D3D12RaytracingMiniEngineSample::Update( float deltaT )
+void DxrMsaaDemo::Update( float deltaT )
 {
     ScopedTimer _prof(L"Update State");
 
@@ -991,7 +1018,7 @@ void D3D12RaytracingMiniEngineSample::Update( float deltaT )
     m_MainScissor.bottom = (LONG)g_SceneColorBuffer.GetHeight();
 }
 
-void D3D12RaytracingMiniEngineSample::RenderObjects(GraphicsContext& gfxContext, const Matrix4& ViewProjMat)
+void DxrMsaaDemo::RenderObjects(GraphicsContext& gfxContext, const Matrix4& ViewProjMat)
 {
     struct VSConstants
     {
@@ -1021,7 +1048,7 @@ void D3D12RaytracingMiniEngineSample::RenderObjects(GraphicsContext& gfxContext,
     }
 }
 
-void D3D12RaytracingMiniEngineSample::SetCameraToPredefinedPosition(int cameraPosition) 
+void DxrMsaaDemo::SetCameraToPredefinedPosition(int cameraPosition) 
 {
     if (cameraPosition < 0 || cameraPosition >= c_NumCameraPositions)
         return;
@@ -1036,7 +1063,7 @@ void D3D12RaytracingMiniEngineSample::SetCameraToPredefinedPosition(int cameraPo
     m_Camera.Update();
 }
 
-void D3D12RaytracingMiniEngineSample::RenderScene()
+void DxrMsaaDemo::RenderScene()
 {
     const bool skipDiffusePass = (renderMode != int(RenderMode::raster));
 
@@ -1093,7 +1120,7 @@ void D3D12RaytracingMiniEngineSample::RenderScene()
     gfxContext.Finish();
 }
 
-void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
+void DxrMsaaDemo::RaytraceDiffuse(
     GraphicsContext& context,
     const Math::Camera& camera,
     ColorBuffer& colorTarget)
@@ -1136,14 +1163,14 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuse(
     pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
-    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTop->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Ray.GetDispatchRayDesc(colorTarget.GetWidth(), colorTarget.GetHeight());
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Ray.m_pPSO);
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
 }
 
-void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
+void DxrMsaaDemo::RaytraceDiffuseBeams(
     GraphicsContext& context,
     const Math::Camera& camera,
     ColorBuffer& colorTarget)
@@ -1186,7 +1213,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
     pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
-    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTop->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 
     // we'll just keep it simple for the demo and round down
     uint32_t beamsX = colorTarget.GetWidth() / BEAM_SIZE;
@@ -1204,7 +1231,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
     pRaytracingCommandList->Dispatch(beamsX, beamsY, 1);
 }
 
-void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext)
+void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
 {
     const UINT framesToAverage = 20;
     static float frameRates[framesToAverage] = {};
@@ -1223,7 +1250,7 @@ void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext
     text.End();
 }
 
-void D3D12RaytracingMiniEngineSample::Raytrace(class GraphicsContext& gfxContext)
+void DxrMsaaDemo::Raytrace(class GraphicsContext& gfxContext)
 {
     ScopedTimer _prof(L"Raytrace", gfxContext);
 
