@@ -707,9 +707,9 @@ void InitializeRaytracingStateObjects(const Model &model, UINT numMeshes)
             stateSubobjects
         };
 
-        g_BeamPostRootSig.Reset(4, 1);
+        g_BeamPostRootSig.Reset(1, 0);
         g_BeamPostRootSig[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 1, D3D12_SHADER_VISIBILITY_ALL);
-        g_BeamPostRootSig.Finalize(L"D3D12RaytracingMiniEngineSample");
+        g_BeamPostRootSig.Finalize(L"g_BeamPostRootSig");
 
         g_BeamShadeQuadsPSO.SetRootSignature(g_BeamPostRootSig);
         // looks like I need to split my compute shaders out into separate files
@@ -1221,8 +1221,12 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvh_topLevelAccelerationStructure->GetGPUVirtualAddress());
 
+    // we'll just keep it simple for the demo and round down
+    uint32_t beamsX = colorTarget.GetWidth() / BEAM_SIZE;
+    uint32_t beamsY = colorTarget.GetHeight() / BEAM_SIZE;
+
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(
-        colorTarget.GetWidth() / BEAM_SIZE, colorTarget.GetHeight() / BEAM_SIZE);
+        beamsX, beamsY);
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Beam.m_pPSO);
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
 
@@ -1230,7 +1234,7 @@ void D3D12RaytracingMiniEngineSample::RaytraceDiffuseBeams(
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
     pRaytracingCommandList->SetComputeRootDescriptorTable(0, g_OutputUAV);
     pRaytracingCommandList->SetPipelineState(g_BeamShadeQuadsPSO.GetPipelineStateObject());
-    pRaytracingCommandList->Dispatch...
+    pRaytracingCommandList->Dispatch(beamsX, beamsY, 1);
 }
 
 void D3D12RaytracingMiniEngineSample::RenderUI(class GraphicsContext& gfxContext)
