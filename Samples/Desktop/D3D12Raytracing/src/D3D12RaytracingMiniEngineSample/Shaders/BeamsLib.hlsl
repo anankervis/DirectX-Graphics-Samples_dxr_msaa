@@ -21,8 +21,13 @@ cbuffer b0 : register(b0)
     ShadeConstants shadeConstants;
 };
 
+struct HitAttribs
+{
+    float2 barycentrics;
+};
+
 [shader("closesthit")]
-void Hit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+void Hit(inout BeamPayload payload, in HitAttribs attr)
 {
     uint materialID = rootConstants.materialID;
 
@@ -111,7 +116,7 @@ Single-pixel rays w/ MSAA can be treated as a collection of 2, 4, 8, 16 subrays 
 Beams represent the conservative volume, which may be a collection of pixels or a spatial query.
 */
 [shader("anyhit")]
-void AnyHit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+void AnyHit(inout BeamPayload payload, in HitAttribs attr)
 {
 }
 
@@ -124,7 +129,13 @@ void Miss(inout BeamPayload payload)
 [shader("intersection")]
 void Intersection()
 {
+    float tHitAABB = RayTCurrent();
 
+    HitAttribs attr;
+    attr.barycentrics.x = 0;
+    attr.barycentrics.y = 0;
+
+    ReportHit(tHitAABB, 0, attr);
 }
 
 [shader("raygeneration")]

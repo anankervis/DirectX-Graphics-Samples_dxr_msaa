@@ -788,14 +788,14 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topPrebuildInfo;
     g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topDesc.Inputs, &topPrebuildInfo);
 
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc;
-    if (triangles)
+    uint32_t aabbTotal = 0;
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc(meshCount);
+    for (uint32_t m = 0; m < meshCount; m++)
     {
-        geoDesc.resize(meshCount);
-        for (uint32_t m = 0; m < meshCount; m++)
-        {
-            const Model::Mesh &mesh = m_Model.m_pMesh[m];
+        const Model::Mesh &mesh = m_Model.m_pMesh[m];
 
+        if (triangles)
+        {
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
             geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
             geoDesc[m].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
@@ -808,15 +808,23 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
             geoDesc[m].Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
             geoDesc[m].Triangles.Transform3x4 = 0;
         }
+        else
+        {
+            uint32_t stride = m_ModelAABBs.GetElementSize();
+            uint32_t triCount = mesh.indexCount / 3;
+
+            geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+            geoDesc[m].AABBs.AABBCount = triCount;
+            geoDesc[m].AABBs.AABBs.StartAddress = m_ModelAABBs.GetGpuVirtualAddress() + aabbTotal * stride;
+            geoDesc[m].AABBs.AABBs.StrideInBytes = stride;
+
+            aabbTotal += uint32_t(geoDesc[m].AABBs.AABBCount);
+        }
     }
-    else
+    if (!triangles)
     {
-        geoDesc.resize(1);
-        geoDesc[0].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-        geoDesc[0].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-        geoDesc[0].AABBs.AABBCount = m_ModelAABBs.GetElementCount();
-        geoDesc[0].AABBs.AABBs.StartAddress = m_ModelAABBs.GetGpuVirtualAddress();
-        geoDesc[0].AABBs.AABBs.StrideInBytes = m_ModelAABBs.GetElementSize();
+        ASSERT(aabbTotal == m_ModelAABBs.GetElementCount());
     }
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomDesc = {};
