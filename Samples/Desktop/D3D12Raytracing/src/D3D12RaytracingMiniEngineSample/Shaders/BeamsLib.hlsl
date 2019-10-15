@@ -118,7 +118,13 @@ void AnyHit(inout BeamPayload payload, in BuiltInTriangleIntersectionAttributes 
 [shader("miss")]
 void Miss(inout BeamPayload payload)
 {
-    g_screenOutput[DispatchRaysIndex().xy] = float4(0, 0, 0, 1);
+    g_screenOutput[DispatchRaysIndex().xy] = float4(0, 0, 1, 1);
+}
+
+[shader("intersection")]
+void Intersection()
+{
+
 }
 
 [shader("raygeneration")]

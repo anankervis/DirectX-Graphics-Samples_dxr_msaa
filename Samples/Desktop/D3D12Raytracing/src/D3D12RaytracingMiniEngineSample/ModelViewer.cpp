@@ -196,7 +196,8 @@ public:
 
 private:
 
-    void createBvh(const Model &model, BVH &bvh, bool triangles);
+    void createAABBs();
+    void createBvh(BVH &bvh, bool triangles);
 
     void RenderObjects( GraphicsContext& Context, const Matrix4& ViewProjMat);
     void RaytraceDiffuse(GraphicsContext& context, const Math::Camera& camera, ColorBuffer& colorTarget);
@@ -214,6 +215,7 @@ private:
     D3D12_CPU_DESCRIPTOR_HANDLE m_DefaultSampler;
 
     Model m_Model;
+    StructuredBuffer m_ModelAABBs;
 
     Vector3 m_SunDirection;
 
@@ -355,9 +357,7 @@ std::unique_ptr<DescriptorHeapStack> g_pRaytracingDescriptorHeap;
 
 StructuredBuffer    g_hitShaderMeshInfoBuffer;
 
-static
-void InitializeSceneInfo(
-    const Model& model)
+static void InitializeSceneInfo(const Model &model)
 {
     //
     // Mesh info
@@ -385,8 +385,7 @@ void InitializeSceneInfo(
     g_SceneMeshInfo = g_hitShaderMeshInfoBuffer.GetSRV();
 }
 
-static
-void InitializeViews(const Model& model)
+static void InitializeViews(const Model &model)
 {
     D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
     UINT uavDescriptorIndex;
@@ -534,6 +533,8 @@ void InitializeRaytracingStateObjects(const Model &model)
     g_pRaytracingDevice->CreateRootSignature(0, pLocalRootSignatureBlob->GetBufferPointer(), pLocalRootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&g_LocalRaytracingRootSignature));
 
     LPCWSTR exportName_RayGen = L"RayGen";
+    LPCWSTR exportName_Intersection = L"Intersection";
+    LPCWSTR exportName_AnyHit = L"AnyHit";
     LPCWSTR exportName_Hit = L"Hit";
     LPCWSTR exportName_Miss = L"Miss";
     LPCWSTR exportName_HitGroup = L"HitGroup";
@@ -542,10 +543,6 @@ void InitializeRaytracingStateObjects(const Model &model)
 
     D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
     pipelineConfig.MaxTraceRecursionDepth = MaxRayRecursion;
-
-    D3D12_HIT_GROUP_DESC hitGroupDesc = {};
-    hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
-    hitGroupDesc.HitGroupExport = exportName_HitGroup;
 
     const UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
     const UINT offsetToDescriptorHandle = ALIGN(sizeof(D3D12_GPU_DESCRIPTOR_HANDLE), shaderIdentifierSize);
@@ -595,6 +592,11 @@ void InitializeRaytracingStateObjects(const Model &model)
             exportDesc // pExports
         };
 
+        D3D12_HIT_GROUP_DESC hitGroupDesc = {};
+        hitGroupDesc.HitGroupExport = exportName_HitGroup;
+        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+        hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
+
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
             { D3D12_STATE_SUBOBJECT_TYPE_NODE_MASK, &nodeMask },
@@ -634,6 +636,8 @@ void InitializeRaytracingStateObjects(const Model &model)
         D3D12_EXPORT_DESC exportDesc[] =
         {
             { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Intersection, nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_AnyHit, nullptr, D3D12_EXPORT_FLAG_NONE },
             { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
             { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
         };
@@ -646,6 +650,13 @@ void InitializeRaytracingStateObjects(const Model &model)
             _countof(exportDesc), // NumExports
             exportDesc // pExports
         };
+
+        D3D12_HIT_GROUP_DESC hitGroupDesc = {};
+        hitGroupDesc.HitGroupExport = exportName_HitGroup;
+        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+        hitGroupDesc.AnyHitShaderImport = exportName_AnyHit;
+        hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
+        hitGroupDesc.IntersectionShaderImport = exportName_Intersection;
 
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
@@ -718,7 +729,53 @@ void InitializeRaytracingStateObjects(const Model &model)
     }
 }
 
-void DxrMsaaDemo::createBvh(const Model &model, BVH &bvh, bool triangles)
+// TODO: could pair up triangles
+void DxrMsaaDemo::createAABBs()
+{
+    uint32_t meshCount = m_Model.m_Header.meshCount;
+
+    std::vector<D3D12_RAYTRACING_AABB> aabbs;
+    for (uint32_t m = 0; m < m_Model.m_Header.meshCount; m++)
+    {
+        const Model::Mesh &mesh = m_Model.m_pMesh[m];
+
+        uint32_t triCount = mesh.indexCount / 3;
+
+        const uint16_t *indexData = (const uint16_t*)(m_Model.m_pIndexData + mesh.indexDataByteOffset);
+        const uint8_t *vertexData = (const uint8_t*)(m_Model.m_pVertexData
+            + mesh.vertexDataByteOffset + mesh.attrib[Model::attrib_position].offset);
+
+        for (uint32_t t = 0; t < triCount; t++)
+        {
+            uint32_t i[3] =
+            {
+                indexData[t * 3 + 0],
+                indexData[t * 3 + 1],
+                indexData[t * 3 + 2],
+            };
+
+            const float *v[3] =
+            {
+                (const float*)(vertexData + mesh.vertexStride * i[0]),
+                (const float*)(vertexData + mesh.vertexStride * i[1]),
+                (const float*)(vertexData + mesh.vertexStride * i[2]),
+            };
+
+            D3D12_RAYTRACING_AABB aabb =
+            {
+                min(v[0][0], min(v[1][0], v[2][0])),
+                min(v[0][1], min(v[1][1], v[2][1])),
+                min(v[0][2], min(v[1][2], v[2][2])),
+            };
+
+            aabbs.push_back(aabb);
+        }
+    }
+
+    m_ModelAABBs.Create(L"AABBs", uint32_t(aabbs.size()), sizeof(D3D12_RAYTRACING_AABB), aabbs.data());
+}
+
+void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
 {
     uint32_t meshCount = m_Model.m_Header.meshCount;
 
@@ -731,13 +788,14 @@ void DxrMsaaDemo::createBvh(const Model &model, BVH &bvh, bool triangles)
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO topPrebuildInfo;
     g_pRaytracingDevice->GetRaytracingAccelerationStructurePrebuildInfo(&topDesc.Inputs, &topPrebuildInfo);
 
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc(meshCount);
-    for (uint32_t m = 0; m < meshCount; m++)
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDesc;
+    if (triangles)
     {
-        const Model::Mesh &mesh = m_Model.m_pMesh[m];
-
-        if (triangles)
+        geoDesc.resize(meshCount);
+        for (uint32_t m = 0; m < meshCount; m++)
         {
+            const Model::Mesh &mesh = m_Model.m_pMesh[m];
+
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
             geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
             geoDesc[m].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
@@ -750,22 +808,20 @@ void DxrMsaaDemo::createBvh(const Model &model, BVH &bvh, bool triangles)
             geoDesc[m].Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
             geoDesc[m].Triangles.Transform3x4 = 0;
         }
-        else
-        {
-            geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-            geoDesc[m].AABBs.AABBCount = mesh.indexCount / 3;
-// TODO: create and upload per-triangle AABB buffers...
-// ... as a perf improvement, it might make sense to sense to do two tris per AABB and have the Intersection shader loop,
-// but I can probably punt on that for this demo. Or until I benchmark and optimize.
-            geoDesc[m].AABBs.AABBs.StartAddress =
-            geoDesc[m].AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
-        }
+    }
+    else
+    {
+        geoDesc.resize(1);
+        geoDesc[0].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+        geoDesc[0].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+        geoDesc[0].AABBs.AABBCount = m_ModelAABBs.GetElementCount();
+        geoDesc[0].AABBs.AABBs.StartAddress = m_ModelAABBs.GetGpuVirtualAddress();
+        geoDesc[0].AABBs.AABBs.StrideInBytes = m_ModelAABBs.GetElementSize();
     }
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomDesc = {};
     bottomDesc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-    bottomDesc.Inputs.NumDescs = meshCount;
+    bottomDesc.Inputs.NumDescs = uint32_t(geoDesc.size());
     bottomDesc.Inputs.pGeometryDescs = geoDesc.data();
     bottomDesc.Inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
     bottomDesc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
@@ -884,7 +940,7 @@ void DxrMsaaDemo::Startup()
 
 #define ASSET_DIRECTORY "../../../../../MiniEngine/ModelViewer/"
     TextureManager::Initialize(ASSET_DIRECTORY L"Textures/");
-    bool bModelLoadSuccess = m_Model.Load(ASSET_DIRECTORY "Models/sponza.h3d");
+    bool bModelLoadSuccess = m_Model.Load(ASSET_DIRECTORY "Models/sponza.h3d", true);
     ASSERT(bModelLoadSuccess, "Failed to load model");
     ASSERT(m_Model.m_Header.meshCount > 0, "Model contains no meshes");
 
@@ -894,8 +950,10 @@ void DxrMsaaDemo::Startup()
     InitializeSceneInfo(m_Model);
     InitializeViews(m_Model);
 
-    createBvh(m_Model, g_bvhTriangles, true);
-    createBvh(m_Model, g_bvhAABBs, false);
+    createAABBs();
+    
+    createBvh(g_bvhTriangles, true);
+    createBvh(g_bvhAABBs, false);
 
     InitializeRaytracingStateObjects(m_Model);
 
@@ -1213,7 +1271,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(4, g_OutputUAV);
-    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs.top->GetGPUVirtualAddress());
 
     // we'll just keep it simple for the demo and round down
     uint32_t beamsX = colorTarget.GetWidth() / BEAM_SIZE;

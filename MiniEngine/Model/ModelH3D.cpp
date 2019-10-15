@@ -19,7 +19,7 @@
 #include "CommandContext.h"
 #include <stdio.h>
 
-bool Model::LoadH3D(const char *filename)
+bool Model::LoadH3D(const char *filename, bool retainCpuDataCopies)
 {
     FILE *file = nullptr;
     if (0 != fopen_s(&file, filename, "rb"))
@@ -81,17 +81,23 @@ bool Model::LoadH3D(const char *filename)
 
     m_VertexBuffer.Create(L"VertexBuffer", m_Header.vertexDataByteSize / m_VertexStride, m_VertexStride, m_pVertexData);
     m_IndexBuffer.Create(L"IndexBuffer", m_Header.indexDataByteSize / sizeof(uint16_t), sizeof(uint16_t), m_pIndexData);
-    delete [] m_pVertexData;
-    m_pVertexData = nullptr;
-    delete [] m_pIndexData;
-    m_pIndexData = nullptr;
+    if (!retainCpuDataCopies)
+    {
+        delete [] m_pVertexData;
+        m_pVertexData = nullptr;
+        delete [] m_pIndexData;
+        m_pIndexData = nullptr;
+    }
 
     m_VertexBufferDepth.Create(L"VertexBufferDepth", m_Header.vertexDataByteSizeDepth / m_VertexStrideDepth, m_VertexStrideDepth, m_pVertexDataDepth);
     m_IndexBufferDepth.Create(L"IndexBufferDepth", m_Header.indexDataByteSize / sizeof(uint16_t), sizeof(uint16_t), m_pIndexDataDepth);
-    delete [] m_pVertexDataDepth;
-    m_pVertexDataDepth = nullptr;
-    delete [] m_pIndexDataDepth;
-    m_pIndexDataDepth = nullptr;
+    if (!retainCpuDataCopies)
+    {
+        delete [] m_pVertexDataDepth;
+        m_pVertexDataDepth = nullptr;
+        delete [] m_pIndexDataDepth;
+        m_pIndexDataDepth = nullptr;
+    }
 
     LoadTextures();
 
