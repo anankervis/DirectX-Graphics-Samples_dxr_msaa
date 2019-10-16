@@ -104,6 +104,7 @@ void Hit(inout BeamPayload payload, in HitAttribs attr)
         shadeConstants.sunColor);
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
+//g_screenOutput[DispatchRaysIndex().xy] = float4(materialID * .05, PrimitiveIndex() * .001, 0, 1);
 }
 
 /*
@@ -118,12 +119,19 @@ Beams represent the conservative volume, which may be a collection of pixels or 
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in HitAttribs attr)
 {
-}
+    uint tileX = DispatchRaysIndex().x;
+    uint tileY = DispatchRaysIndex().y;
+    uint tileIndex = tileY * DispatchRaysDimensions().x + tileX;
 
-[shader("miss")]
-void Miss(inout BeamPayload payload)
-{
-    g_screenOutput[DispatchRaysIndex().xy] = float4(0, 0, 1, 1);
+    uint triSlot;
+    InterlockedAdd(g_tileTriCounts[tileIndex], 1, triSlot);
+
+    if (triSlot >= TILE_MAX_TRIS)
+        return;
+
+    uint id = (rootConstants.materialID << 16) | PrimitiveIndex();
+
+    g_tileTris[tileIndex].id[triSlot] = id;
 }
 
 [shader("intersection")]
@@ -155,20 +163,4 @@ void RayGen()
     BeamPayload payload;
 
     TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
-}
-
-/*
-Convert beam triangle list to quads of triangleID + coverage mask
-*/
-[numthreads(BEAM_SIZE, BEAM_SIZE, 1)]
-[RootSignature(
-    "UAV(u2)"
-)]
-void BeamTrisToQuads(
-    uint groupIndex : SV_GroupIndex,
-    uint3 groupThreadID : SV_GroupThreadID,
-    uint3 groupID : SV_GroupID,
-    uint3 dispatchThreadID : SV_DispatchThreadID)
-{
-    g_screenOutput[dispatchThreadID.xy] = float4(0, 1, 0, 1);
 }

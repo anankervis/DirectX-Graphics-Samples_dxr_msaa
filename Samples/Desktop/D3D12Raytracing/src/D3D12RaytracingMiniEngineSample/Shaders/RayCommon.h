@@ -4,7 +4,13 @@
 # include "HlslCompat.h"
 #endif
 
-#define BEAM_SIZE 8
+#define BEAM_SIZE 2
+#define TILE_MAX_TRIS 16
+
+struct TileTri
+{
+    uint id[TILE_MAX_TRIS]; // material + primitive IDs
+};
 
 struct RayTraceMeshInfo
 {
@@ -24,7 +30,9 @@ struct DynamicCB
     float4x4 cameraToWorld;
     float3   worldCameraPosition;
     uint     padding;
-    float2   resolution;
+
+    uint tilesX;
+    uint tilesY;
 };
 
 struct RootConstants
@@ -52,12 +60,14 @@ RaytracingAccelerationStructure g_accel : register(t0);
 StructuredBuffer<RayTraceMeshInfo> g_meshInfo : register(t1);
 ByteAddressBuffer g_indices : register(t2);
 ByteAddressBuffer g_attributes : register(t3);
-Texture2D<float4> g_localTexture : register(t6);
-Texture2D<float4> g_localNormal : register(t7);
+Texture2D<float4> g_localTexture : register(t4);
+Texture2D<float4> g_localNormal : register(t5);
 
 SamplerState      g_s0 : register(s0);
 
 RWTexture2D<float4> g_screenOutput : register(u2);
+RWStructuredBuffer<uint> g_tileTriCounts : register(u3);
+RWStructuredBuffer<TileTri> g_tileTris : register(u4);
 
 cbuffer b1 : register(b1)
 {
