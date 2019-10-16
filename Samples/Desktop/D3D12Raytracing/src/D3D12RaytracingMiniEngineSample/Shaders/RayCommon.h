@@ -4,7 +4,7 @@
 # include "HlslCompat.h"
 #endif
 
-#define BEAM_SIZE 2
+#define TILE_SIZE 2
 #define TILE_MAX_TRIS 16
 
 struct TileTri

@@ -697,7 +697,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     // beam post processing shaders
     {
         g_BeamPostRootSig.Reset(2, 0);
-        g_BeamPostRootSig[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 3, D3D12_SHADER_VISIBILITY_ALL);
+        g_BeamPostRootSig[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 3);
         g_BeamPostRootSig[1].InitAsConstantBuffer(1);
         g_BeamPostRootSig.Finalize(L"g_BeamPostRootSig");
 
@@ -797,7 +797,7 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
             uint32_t aabbCount = triCount;
 
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+            geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION;
             geoDesc[m].AABBs.AABBCount = aabbCount;
             geoDesc[m].AABBs.AABBs.StartAddress = m_ModelAABBs.GetGpuVirtualAddress() + aabbTotal * stride;
             geoDesc[m].AABBs.AABBs.StrideInBytes = stride;
@@ -948,8 +948,8 @@ void DxrMsaaDemo::Startup()
     // beam buffers
     {
         // we'll just keep it simple for the demo and round down
-        m_tilesX = g_SceneColorBuffer.GetWidth() / BEAM_SIZE;
-        m_tilesY = g_SceneColorBuffer.GetHeight() / BEAM_SIZE;
+        m_tilesX = g_SceneColorBuffer.GetWidth() / TILE_SIZE;
+        m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_SIZE;
         uint32_t tileCount = m_tilesX * m_tilesY;
 
         m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
@@ -1278,6 +1278,10 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
         m_tilesX, m_tilesY);
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Beam.m_pPSO);
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
+
+    context.InsertUAVBarrier(m_tileTriCounts);
+    context.InsertUAVBarrier(m_tileTris);
+    context.FlushResourceBarriers();
 
     // shade quads
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
