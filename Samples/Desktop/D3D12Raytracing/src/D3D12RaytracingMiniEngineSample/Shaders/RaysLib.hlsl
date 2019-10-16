@@ -99,7 +99,6 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         shadeConstants.sunColor);
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
-g_screenOutput[DispatchRaysIndex().xy] = float4(diffuseColor, 1);
 }
 
 [shader("miss")]

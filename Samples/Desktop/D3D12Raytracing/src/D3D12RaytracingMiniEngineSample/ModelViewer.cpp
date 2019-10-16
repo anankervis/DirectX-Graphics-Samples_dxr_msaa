@@ -493,7 +493,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
     D3D12_DESCRIPTOR_RANGE1 sceneBuffersDescriptorRange = {};
     sceneBuffersDescriptorRange.BaseShaderRegister = 1;
-    sceneBuffersDescriptorRange.NumDescriptors = 5;
+    sceneBuffersDescriptorRange.NumDescriptors = 3;
     sceneBuffersDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     sceneBuffersDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
 
@@ -522,7 +522,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     g_pRaytracingDevice->CreateRootSignature(0, pGlobalRootSignatureBlob->GetBufferPointer(), pGlobalRootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&g_GlobalRaytracingRootSignature));
 
     D3D12_DESCRIPTOR_RANGE1 localTextureDescriptorRange = {};
-    localTextureDescriptorRange.BaseShaderRegister = 6;
+    localTextureDescriptorRange.BaseShaderRegister = 10;
     localTextureDescriptorRange.NumDescriptors = 2;
     localTextureDescriptorRange.RegisterSpace = 0;
     localTextureDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -705,17 +705,6 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         // looks like I need to split my compute shaders out into separate files
         g_BeamShadeQuadsPSO.SetComputeShader(g_pBeamsShadeQuads, sizeof(g_pBeamsShadeQuads));
         g_BeamShadeQuadsPSO.Finalize();
-    }
-
-    // beam buffers
-    {
-        // we'll just keep it simple for the demo and round down
-        m_tilesX = g_SceneColorBuffer.GetWidth() / BEAM_SIZE;
-        m_tilesY = g_SceneColorBuffer.GetHeight() / BEAM_SIZE;
-        uint32_t tileCount = m_tilesX * m_tilesY;
-
-        m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
-        m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
     }
 }
 
@@ -956,9 +945,19 @@ void DxrMsaaDemo::Startup()
     createBvh(g_bvhTriangles, true);
     createBvh(g_bvhAABBs, false);
 
-    InitializeRaytracingStateObjects();
-// TODO: model SRVs need to be grabbed before InitializeRaytracingStateObjects()
+    // beam buffers
+    {
+        // we'll just keep it simple for the demo and round down
+        m_tilesX = g_SceneColorBuffer.GetWidth() / BEAM_SIZE;
+        m_tilesY = g_SceneColorBuffer.GetHeight() / BEAM_SIZE;
+        uint32_t tileCount = m_tilesX * m_tilesY;
+
+        m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
+        m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
+    }
+
     InitializeViews();
+    InitializeRaytracingStateObjects();
 
     float modelRadius = Length(m_Model.m_Header.boundingBox.max - m_Model.m_Header.boundingBox.min) * .5f;
     const Vector3 eye = (m_Model.m_Header.boundingBox.min + m_Model.m_Header.boundingBox.max) * .5f + Vector3(modelRadius * .5f, 0.0f, 0.0f);

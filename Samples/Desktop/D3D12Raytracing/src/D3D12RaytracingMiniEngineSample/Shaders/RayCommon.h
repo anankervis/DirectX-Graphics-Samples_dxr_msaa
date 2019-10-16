@@ -57,11 +57,13 @@ static const float FLT_MAX = asfloat(0x7F7FFFFF);
 # endif
 
 RaytracingAccelerationStructure g_accel : register(t0);
+
 StructuredBuffer<RayTraceMeshInfo> g_meshInfo : register(t1);
 ByteAddressBuffer g_indices : register(t2);
 ByteAddressBuffer g_attributes : register(t3);
-Texture2D<float4> g_localTexture : register(t4);
-Texture2D<float4> g_localNormal : register(t5);
+
+Texture2D<float4> g_localTexture : register(t10);
+Texture2D<float4> g_localNormal : register(t11);
 
 SamplerState      g_s0 : register(s0);
 
