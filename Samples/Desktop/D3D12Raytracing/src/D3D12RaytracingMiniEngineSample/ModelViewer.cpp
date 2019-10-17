@@ -373,7 +373,7 @@ private:
 
 std::unique_ptr<DescriptorHeapStack> g_pRaytracingDescriptorHeap;
 
-StructuredBuffer    g_hitShaderMeshInfoBuffer;
+StructuredBuffer g_hitShaderMeshInfoBuffer;
 
 void DxrMsaaDemo::InitializeSceneInfo()
 {
@@ -383,15 +383,15 @@ void DxrMsaaDemo::InitializeSceneInfo()
     std::vector<RayTraceMeshInfo>   meshInfoData(m_Model.m_Header.meshCount);
     for (UINT i=0; i < m_Model.m_Header.meshCount; ++i)
     {
-        meshInfoData[i].m_indexOffsetBytes = m_Model.m_pMesh[i].indexDataByteOffset;
-        meshInfoData[i].m_uvAttributeOffsetBytes = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_texcoord0].offset;
-        meshInfoData[i].m_normalAttributeOffsetBytes = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_normal].offset;
-        meshInfoData[i].m_positionAttributeOffsetBytes = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_position].offset;
-        meshInfoData[i].m_tangentAttributeOffsetBytes = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_tangent].offset;
-        meshInfoData[i].m_bitangentAttributeOffsetBytes = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_bitangent].offset;
-        meshInfoData[i].m_attributeStrideBytes = m_Model.m_pMesh[i].vertexStride;
-        meshInfoData[i].m_materialInstanceId = m_Model.m_pMesh[i].materialIndex;
-        ASSERT(meshInfoData[i].m_materialInstanceId < 27);
+        meshInfoData[i].indexOffset = m_Model.m_pMesh[i].indexDataByteOffset;
+        meshInfoData[i].attrOffsetTexcoord0 = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_texcoord0].offset;
+        meshInfoData[i].attrOffsetNormal = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_normal].offset;
+        meshInfoData[i].attrOffsetPos = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_position].offset;
+        meshInfoData[i].attrOffsetTangent = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_tangent].offset;
+        meshInfoData[i].attrOffsetBitangent = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_bitangent].offset;
+        meshInfoData[i].attrStride = m_Model.m_pMesh[i].vertexStride;
+        meshInfoData[i].materialID = m_Model.m_pMesh[i].materialIndex;
+        ASSERT(meshInfoData[i].materialID < 27);
     }
 
     g_hitShaderMeshInfoBuffer.Create(L"RayTraceMeshInfo",
@@ -511,7 +511,9 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     globalRootSignatureParameters[4].InitAsUnorderedAccessView(0);
     globalRootSignatureParameters[5].InitAsUnorderedAccessView(1);
     globalRootSignatureParameters[6].InitAsShaderResourceView(0);
-    auto globalRootSignatureDesc = CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC(_countof(globalRootSignatureParameters), globalRootSignatureParameters, _countof(staticSamplerDescs), staticSamplerDescs);
+    auto globalRootSignatureDesc = CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC(
+        _countof(globalRootSignatureParameters), globalRootSignatureParameters,
+        _countof(staticSamplerDescs), staticSamplerDescs);
 
     CComPtr<ID3DBlob> pGlobalRootSignatureBlob;
     CComPtr<ID3DBlob> pErrorBlob;
@@ -696,9 +698,16 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
     // beam post processing shaders
     {
-        g_BeamPostRootSig.Reset(2, 0);
-        g_BeamPostRootSig[0].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 3);
+        SamplerDesc DefaultSamplerDesc;
+        DefaultSamplerDesc.MaxAnisotropy = 8;
+
+        g_BeamPostRootSig.Reset(5, 1);
+        g_BeamPostRootSig[0].InitAsConstantBuffer(0);
         g_BeamPostRootSig[1].InitAsConstantBuffer(1);
+        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 3);
+        g_BeamPostRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
+        g_BeamPostRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 100, UINT_MAX);
+        g_BeamPostRootSig.InitStaticSampler(0, DefaultSamplerDesc);
         g_BeamPostRootSig.Finalize(L"g_BeamPostRootSig");
 
         g_BeamShadeQuadsPSO.SetRootSignature(g_BeamPostRootSig);
@@ -948,8 +957,8 @@ void DxrMsaaDemo::Startup()
     // beam buffers
     {
         // we'll just keep it simple for the demo and round down
-        m_tilesX = g_SceneColorBuffer.GetWidth() / TILE_SIZE;
-        m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_SIZE;
+        m_tilesX = g_SceneColorBuffer.GetWidth() / TILE_DIM;
+        m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_DIM;
         uint32_t tileCount = m_tilesX * m_tilesY;
 
         m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
@@ -1285,8 +1294,11 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
 
     // shade quads
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
-    pRaytracingCommandList->SetComputeRootDescriptorTable(0, g_OutputUAV);
+    pRaytracingCommandList->SetComputeRootConstantBufferView(0, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pRaytracingCommandList->SetComputeRootConstantBufferView(1, g_dynamicConstantBuffer.GetGpuVirtualAddress());
+    pRaytracingCommandList->SetComputeRootDescriptorTable(2, g_OutputUAV);
+    pRaytracingCommandList->SetComputeRootDescriptorTable(3, g_SceneSrvs);
+    pRaytracingCommandList->SetComputeRootDescriptorTable(4, g_GpuSceneMaterialSrvs[0]);
     pRaytracingCommandList->SetPipelineState(g_BeamShadeQuadsPSO.GetPipelineStateObject());
     pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
 }

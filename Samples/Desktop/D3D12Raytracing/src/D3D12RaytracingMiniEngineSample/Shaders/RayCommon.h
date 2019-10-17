@@ -4,8 +4,8 @@
 # include "HlslCompat.h"
 #endif
 
-#define TILE_SIZE 2
-#define TILE_MAX_TRIS 16
+#define TILE_DIM 8
+#define TILE_MAX_TRIS 256
 
 struct TileTri
 {
@@ -14,21 +14,21 @@ struct TileTri
 
 struct RayTraceMeshInfo
 {
-    uint  m_indexOffsetBytes;
-    uint  m_uvAttributeOffsetBytes;
-    uint  m_normalAttributeOffsetBytes;
-    uint  m_tangentAttributeOffsetBytes;
-    uint  m_bitangentAttributeOffsetBytes;
-    uint  m_positionAttributeOffsetBytes;
-    uint  m_attributeStrideBytes;
-    uint  m_materialInstanceId;
+    uint indexOffset;
+    uint attrOffsetTexcoord0;
+    uint attrOffsetNormal;
+    uint attrOffsetTangent;
+    uint attrOffsetBitangent;
+    uint attrOffsetPos;
+    uint attrStride;
+    uint materialID;
 };
 
 // Volatile part (can be split into its own CBV). 
 struct DynamicCB
 {
     float4x4 cameraToWorld;
-    float3   worldCameraPosition;
+    float3 worldCameraPosition;
 
     uint tilesX;
     uint tilesY;
@@ -36,7 +36,7 @@ struct DynamicCB
 
 struct RootConstants
 {
-    uint materialID;
+    uint meshID;
 };
 
 struct RayPayload
@@ -110,10 +110,14 @@ float2 GetUVAttribute(uint byteOffset)
     return asfloat(g_attributes.Load2(byteOffset));
 }
 
-inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 direction)
+inline void GenerateCameraRay(
+    uint2 tileDim,
+    uint2 tilePos,
+    out float3 origin,
+    out float3 direction)
 {
-    float2 xy = index + 0.5; // center in the middle of the pixel
-    float2 screenPos = xy / float2(DispatchRaysDimensions().xy) * 2.0 - 1.0;
+    float2 xy = tilePos + 0.5; // center in the middle of the pixel
+    float2 screenPos = xy / float2(tileDim) * 2.0 - 1.0;
 
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;

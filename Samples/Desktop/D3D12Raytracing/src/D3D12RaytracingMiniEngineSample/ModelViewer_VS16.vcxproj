@@ -193,6 +193,7 @@
   <ItemGroup>
     <ClInclude Include="DXSampleHelper.h" />
     <ClInclude Include="Shaders\HlslCompat.h" />
+    <ClInclude Include="Shaders\Intersect.h" />
     <ClInclude Include="Shaders\RayCommon.h" />
     <ClInclude Include="Shaders\ModelViewerRS.h" />
     <ClInclude Include="Shaders\Shading.h" />
