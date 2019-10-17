@@ -12,9 +12,9 @@
 
 STRUCT_ALIGN(16) struct ShadeConstants
 {
-    float3 sunDirection;
-    float3 sunColor;
-    float3 ambientColor;
+    float3 sunDirection; uint pad0;
+    float3 sunColor; uint pad1;
+    float3 ambientColor; uint pad2;
 };
 
 #ifdef HLSL

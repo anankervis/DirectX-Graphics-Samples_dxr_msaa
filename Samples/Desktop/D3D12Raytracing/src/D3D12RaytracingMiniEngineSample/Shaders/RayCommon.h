@@ -29,7 +29,6 @@ struct DynamicCB
 {
     float4x4 cameraToWorld;
     float3   worldCameraPosition;
-    uint     padding;
 
     uint tilesX;
     uint tilesY;

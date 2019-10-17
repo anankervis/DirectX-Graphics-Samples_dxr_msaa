@@ -20,7 +20,6 @@ void ShadeQuads(
     uint tileX = groupID.x;
     uint tileY = groupID.y;
     uint tileIndex = tileY * dynamicConstants.tilesX + tileX;
-    //uint tileIndex = tileY * 960 + tileX;
 
     uint triCount = g_tileTriCounts[tileIndex];
     if (triCount <= 0)
