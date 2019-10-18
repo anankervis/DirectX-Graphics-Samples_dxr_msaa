@@ -118,11 +118,13 @@ void ShadeQuads(
     uint tileTriCount = g_tileTriCounts[tileIndex];
     if (tileTriCount <= 0)
     {
+        // no triangles overlap this tile
         g_screenOutput[dispatchThreadID.xy] = float4(0, 0, 1, 1);
         return;
     }
     else if (tileTriCount > TILE_MAX_TRIS)
     {
+        // tile tri list overflowed
         g_screenOutput[dispatchThreadID.xy] = float4(1, 0, 0, 1);
         return;
     }
@@ -158,9 +160,34 @@ void ShadeQuads(
         }
     }
 
+    if (nearestID == ~uint(0))
+    {
+        // no hit
+        g_screenOutput[dispatchThreadID.xy] = float4(1, 0, 1, 1);
+        return;
+    }
+
     uint meshID = nearestID >> 16;
     uint primID = nearestID & 0xffff;
     float4 outColor = Shade(pixelDimX, pixelDimY, pixelX, pixelY, rayOrigin, rayDir, meshID, primID, nearestUVWT);
 
     g_screenOutput[dispatchThreadID.xy] = outColor;
+
+//g_screenOutput[dispatchThreadID.xy] = float4(0, meshID / 32.0f, 0, 1);
+//g_screenOutput[dispatchThreadID.xy] = float4(0, (g_tileTris[tileIndex].id[0] & 0xffff) / 1024.0f, 0, 1);
+
+/*g_screenOutput[dispatchThreadID.xy] = float4(0,
+    Load3x16BitIndices(
+        g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].indexOffset + 3 * 2 * (g_tileTris[tileIndex].id[0] & 0xffff)
+    ).x % 16 / 16.0f, 0, 1);*/
+
+/*g_screenOutput[dispatchThreadID.xy] = float4(0,
+    fmod(asfloat(g_attributes.Load3(g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].attrOffsetPos +
+        Load3x16BitIndices(
+            g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].indexOffset + 3 * 2 * (g_tileTris[tileIndex].id[0] & 0xffff)
+        ).x * g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].attrStride)).x * .01f + 1000.0f, 1.0f)
+    , 0, 1);*/
+
+//g_screenOutput[dispatchThreadID.xy] = float4(fmod(rayOrigin * .0001f + 1000.0f, 1.0f), 1);
+//g_screenOutput[dispatchThreadID.xy] = float4(rayDir * .5f + .5f, 1);
 }

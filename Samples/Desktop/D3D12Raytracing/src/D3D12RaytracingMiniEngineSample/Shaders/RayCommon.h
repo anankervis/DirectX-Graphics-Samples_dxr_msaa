@@ -122,11 +122,8 @@ inline void GenerateCameraRay(
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;
 
-    // Unproject into a ray
-    float4 unprojected = mul(dynamicConstants.cameraToWorld, float4(screenPos, 0, 1));
-    float3 world = unprojected.xyz / unprojected.w;
     origin = dynamicConstants.worldCameraPosition;
-    direction = normalize(world - origin);
+    direction = mul(dynamicConstants.cameraToWorld, float4(screenPos, -1, 0)).xyz;
 }
 
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)

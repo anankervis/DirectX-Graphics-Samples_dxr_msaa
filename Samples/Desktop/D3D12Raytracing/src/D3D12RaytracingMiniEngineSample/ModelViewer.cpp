@@ -1199,17 +1199,18 @@ void DxrMsaaDemo::RaytraceDiffuse(
 
     // Prepare constants
     DynamicCB inputs = g_dynamicCb;
-    auto m0 = camera.GetViewProjMatrix();
-    auto m1 = Transpose(Invert(m0));
-    memcpy(&inputs.cameraToWorld, &m1, sizeof(inputs.cameraToWorld));
+    Matrix4 viewToWorld = 
+        Matrix4::MakeScale(Vector3(1.0f / camera.GetProjMatrix().GetX().GetX(), 1.0f / camera.GetProjMatrix().GetY().GetY(), 1.0f)) *
+        Transpose(Invert(camera.GetViewMatrix()));
+    memcpy(&inputs.cameraToWorld, &viewToWorld, sizeof(inputs.cameraToWorld));
     memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
+    context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     ShadeConstants shadeConstants = {};
     shadeConstants.sunDirection = m_SunDirection;
     shadeConstants.sunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
     shadeConstants.ambientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
     context.WriteBuffer(g_shadeConstantBuffer, 0, &shadeConstants, sizeof(shadeConstants));
-    context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
@@ -1245,19 +1246,20 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
 
     // Prepare constants
     DynamicCB inputs = g_dynamicCb;
-    auto m0 = camera.GetViewProjMatrix();
-    auto m1 = Transpose(Invert(m0));
-    memcpy(&inputs.cameraToWorld, &m1, sizeof(inputs.cameraToWorld));
+    Matrix4 viewToWorld = 
+        Matrix4::MakeScale(Vector3(1.0f / camera.GetProjMatrix().GetX().GetX(), 1.0f / camera.GetProjMatrix().GetY().GetY(), 1.0f)) *
+        Transpose(Invert(camera.GetViewMatrix()));
+    memcpy(&inputs.cameraToWorld, &viewToWorld, sizeof(inputs.cameraToWorld));
     memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
     inputs.tilesX = m_tilesX;
     inputs.tilesY = m_tilesY;
+    context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     ShadeConstants shadeConstants = {};
     shadeConstants.sunDirection = m_SunDirection;
     shadeConstants.sunColor = Vector3(1.0f, 1.0f, 1.0f) * m_SunLightIntensity;
     shadeConstants.ambientColor = Vector3(1.0f, 1.0f, 1.0f) * m_AmbientIntensity;
     context.WriteBuffer(g_shadeConstantBuffer, 0, &shadeConstants, sizeof(shadeConstants));
-    context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
