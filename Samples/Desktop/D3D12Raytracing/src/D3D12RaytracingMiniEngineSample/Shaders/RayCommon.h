@@ -4,7 +4,9 @@
 # include "HlslCompat.h"
 #endif
 
-#define TILE_DIM 8
+#define TILE_DIM_LOG2 3
+#define TILE_DIM (1 << TILE_DIM_LOG2)
+#define TILE_SIZE (TILE_DIM * TILE_DIM)
 #define TILE_MAX_TRIS 256
 
 struct TileTri
@@ -79,36 +81,6 @@ cbuffer b3 : register(b3)
 {
     RootConstants rootConstants;
 };
-
-uint3 Load3x16BitIndices(
-    uint offsetBytes)
-{
-    const uint dwordAlignedOffset = offsetBytes & ~3;
-
-    const uint2 four16BitIndices = g_indices.Load2(dwordAlignedOffset);
-
-    uint3 indices;
-
-    if (dwordAlignedOffset == offsetBytes)
-    {
-        indices.x = four16BitIndices.x & 0xffff;
-        indices.y = (four16BitIndices.x >> 16) & 0xffff;
-        indices.z = four16BitIndices.y & 0xffff;
-    }
-    else
-    {
-        indices.x = (four16BitIndices.x >> 16) & 0xffff;
-        indices.y = four16BitIndices.y & 0xffff;
-        indices.z = (four16BitIndices.y >> 16) & 0xffff;
-    }
-
-    return indices;
-}
-
-float2 GetUVAttribute(uint byteOffset)
-{
-    return asfloat(g_attributes.Load2(byteOffset));
-}
 
 inline void GenerateCameraRay(
     uint2 pixelDim,

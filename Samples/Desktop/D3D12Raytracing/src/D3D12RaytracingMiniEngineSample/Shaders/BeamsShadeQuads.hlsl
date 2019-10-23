@@ -3,6 +3,7 @@
 #include "Intersect.h"
 #include "RayCommon.h"
 #include "Shading.h"
+#include "TriFetch.h"
 
 cbuffer b0 : register(b0)
 {
@@ -11,75 +12,55 @@ cbuffer b0 : register(b0)
 
 Texture2D<float4> g_materialTextures[] : register(t100);
 
+groupshared float2 tileUVs[TILE_SIZE];
+
 float4 Shade(
+    uint threadID, // for groupshared fallback
     uint pixelDimX, uint pixelDimY, uint pixelX, uint pixelY,
     float3 rayOrigin, float3 rayDir, uint meshID, uint primID, float4 uvwt
 )
 {
-    RayTraceMeshInfo mesh = g_meshInfo[meshID];
-    uint materialID = mesh.materialID;
+    uint materialID = g_meshInfo[meshID].materialID;
+    TriInterpolated tri = triFetchAndInterpolate(meshID, primID, uvwt.xyz);
 
-    const uint3 ii = Load3x16BitIndices(mesh.indexOffset + primID * 3 * 2);
-    const float2 uv0 = GetUVAttribute(mesh.attrOffsetTexcoord0 + ii.x * mesh.attrStride);
-    const float2 uv1 = GetUVAttribute(mesh.attrOffsetTexcoord0 + ii.y * mesh.attrStride);
-    const float2 uv2 = GetUVAttribute(mesh.attrOffsetTexcoord0 + ii.z * mesh.attrStride);
+    // Bug: well, no surprise, these don't work in compute shaders, even though they were spec'd to.
+    // Response from Tex at MSFT: Known issue that will be fixed in Vibranium (Spring 2020).
+    // Current GitHub master build has this fixed, but you still need a new DXIL.dll for signed shaders
+    // for the whole thing to work...
+    //float2 uv00 = QuadReadLaneAt(tri.uv, 0);
+    //float2 uv10 = QuadReadLaneAt(tri.uv, 1);
+    //float2 uv01 = QuadReadLaneAt(tri.uv, 2);
 
-    float3 bary = uvwt.xyz;
-    float2 uv = bary.x * uv0 + bary.y * uv1 + bary.z * uv2;
+    // groupshared fallback
+    tileUVs[threadID] = tri.uv;
+    GroupMemoryBarrierWithGroupSync();
+    uint threadID00 = threadID & ~3;
+    float2 uv00 = tileUVs[threadID00 + 0];
+    float2 uv10 = tileUVs[threadID00 + 1];
+    float2 uv01 = tileUVs[threadID00 + 2];
 
-    const float3 normal0 = asfloat(g_attributes.Load3(mesh.attrOffsetNormal + ii.x * mesh.attrStride));
-    const float3 normal1 = asfloat(g_attributes.Load3(mesh.attrOffsetNormal + ii.y * mesh.attrStride));
-    const float3 normal2 = asfloat(g_attributes.Load3(mesh.attrOffsetNormal + ii.z * mesh.attrStride));
-    float3 vsNormal = normalize(normal0 * bary.x + normal1 * bary.y + normal2 * bary.z);
+    float2 uvDx = uv10 - uv00;
+    float2 uvDy = uv01 - uv00;
 
-    const float3 tangent0 = asfloat(g_attributes.Load3(mesh.attrOffsetTangent + ii.x * mesh.attrStride));
-    const float3 tangent1 = asfloat(g_attributes.Load3(mesh.attrOffsetTangent + ii.y * mesh.attrStride));
-    const float3 tangent2 = asfloat(g_attributes.Load3(mesh.attrOffsetTangent + ii.z * mesh.attrStride));
-    float3 vsTangent = normalize(tangent0 * bary.x + tangent1 * bary.y + tangent2 * bary.z);
+    float3 diffuseColor = g_materialTextures[materialID * 2 + 0].SampleGrad(g_s0, tri.uv, uvDx, uvDy).rgb;
 
-    // Reintroduced the bitangent because we aren't storing the handedness of the tangent frame anywhere.  Assuming the space
-    // is right-handed causes normal maps to invert for some surfaces.  The Sponza mesh has all three axes of the tangent frame.
-    //float3 vsBitangent = normalize(cross(vsNormal, vsTangent)) * (isRightHanded ? 1.0 : -1.0);
-    const float3 bitangent0 = asfloat(g_attributes.Load3(mesh.attrOffsetBitangent + ii.x * mesh.attrStride));
-    const float3 bitangent1 = asfloat(g_attributes.Load3(mesh.attrOffsetBitangent + ii.y * mesh.attrStride));
-    const float3 bitangent2 = asfloat(g_attributes.Load3(mesh.attrOffsetBitangent + ii.z * mesh.attrStride));
-    float3 vsBitangent = normalize(bitangent0 * bary.x + bitangent1 * bary.y + bitangent2 * bary.z);
-
-    // TODO: Should just store uv partial derivatives in here rather than loading position and caculating it per pixel
-    const float3 p0 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + ii.x * mesh.attrStride));
-    const float3 p1 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + ii.y * mesh.attrStride));
-    const float3 p2 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + ii.z * mesh.attrStride));
-
-    float3 worldPosition = rayOrigin + rayDir * uvwt.w;
-
-    float3 ddxOrigin, ddxDir, ddyOrigin, ddyDir;
-    GenerateCameraRay(uint2(pixelDimX, pixelDimY), uint2(pixelX + 1, pixelY), ddxOrigin, ddxDir);
-    GenerateCameraRay(uint2(pixelDimX, pixelDimY), uint2(pixelX, pixelY + 1), ddyOrigin, ddyDir);
-
-    float3 triangleNormal = normalize(cross(p2 - p0, p1 - p0));
-    float3 xOffsetPoint = RayPlaneIntersection(worldPosition, triangleNormal, ddxOrigin, ddxDir);
-    float3 yOffsetPoint = RayPlaneIntersection(worldPosition, triangleNormal, ddyOrigin, ddyDir);
-
-    float3 dpdu, dpdv;
-    CalculateTrianglePartialDerivatives(uv0, uv1, uv2, p0, p1, p2, dpdu, dpdv);
-    float2 ddx, ddy;
-    CalculateUVDerivatives(triangleNormal, dpdu, dpdv, worldPosition, xOffsetPoint, yOffsetPoint, ddx, ddy);
-
-    const float3 viewDir = normalize(-rayDir);
-
-    const float3 diffuseColor = g_materialTextures[materialID * 2 + 0].SampleGrad(g_s0, uv, ddx, ddy).rgb;
-    float specularMask = 0;     // TODO: read the texture
-
-    float gloss = 128.0;
-    float3 normal = g_materialTextures[materialID * 2 + 1].SampleGrad(g_s0, uv, ddx, ddy).rgb * 2.0 - 1.0;
+    float3 normal = g_materialTextures[materialID * 2 + 1].SampleGrad(g_s0, tri.uv, uvDx, uvDy).rgb * 2 - 1;
+    float gloss = 128;
     AntiAliasSpecular(normal, gloss);
-    float3x3 tbn = float3x3(vsTangent, vsBitangent, vsNormal);
+
+    float3x3 tbn = float3x3(
+        normalize(tri.tangent),
+        normalize(tri.bitangent),
+        normalize(tri.normal));
     normal = normalize(mul(normal, tbn));
+
+    float3 viewDir = normalize(-rayDir);
+    float specularMask = 0; // TODO: read the texture
 
     float3 outputColor = Shade(
         diffuseColor,
         shadeConstants.ambientColor,
-        float3(0.56, 0.56, 0.56),
+        float3(.56f, .56f, .56f),
         specularMask,
         gloss,
         normal,
@@ -90,7 +71,17 @@ float4 Shade(
     return float4(outputColor, 1);
 }
 
-[numthreads(TILE_DIM, TILE_DIM, 1)]
+// this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader...
+// ...if the intrinsics weren't currently disallowed (known issue, see above)
+void threadIndexToQuadSwizzle(uint threadID, out uint localX, out uint localY)
+{
+    // address bit layout (high to low) for an 8x8 tile: yyxxyx
+    uint tileDimMask = (1 << TILE_DIM_LOG2) - 1;
+    localX = (((threadID >> 2                  ) << 1) | ( threadID       & 1)) & tileDimMask;
+    localY = (((threadID >> (1 + TILE_DIM_LOG2)) << 1) | ((threadID >> 1) & 1)) & tileDimMask;
+}
+
+[numthreads(TILE_SIZE, 1, 1)]
 [RootSignature(
     "CBV(b0),"
     "CBV(b1),"
@@ -108,10 +99,12 @@ void ShadeQuads(
     uint tileX = groupID.x;
     uint tileY = groupID.y;
     uint tileIndex = tileY * dynamicConstants.tilesX + tileX;
-    uint localX = groupThreadID.x;
-    uint localY = groupThreadID.y;
-    uint pixelX = dispatchThreadID.x;
-    uint pixelY = dispatchThreadID.y;
+    uint threadID = groupThreadID.x;
+    uint localX;
+    uint localY;
+    threadIndexToQuadSwizzle(threadID, localX, localY);
+    uint pixelX = tileX * TILE_DIM + localX;
+    uint pixelY = tileY * TILE_DIM + localY;
     uint pixelDimX = dynamicConstants.tilesX * TILE_DIM;
     uint pixelDimY = dynamicConstants.tilesY * TILE_DIM;
 
@@ -119,13 +112,13 @@ void ShadeQuads(
     if (tileTriCount <= 0)
     {
         // no triangles overlap this tile
-        g_screenOutput[dispatchThreadID.xy] = float4(0, 0, 1, 1);
+        g_screenOutput[uint2(pixelX, pixelY)] = float4(0, 0, 1, 1);
         return;
     }
     else if (tileTriCount > TILE_MAX_TRIS)
     {
         // tile tri list overflowed
-        g_screenOutput[dispatchThreadID.xy] = float4(1, 0, 0, 1);
+        g_screenOutput[uint2(pixelX, pixelY)] = float4(1, 0, 0, 1);
         return;
     }
 
@@ -141,16 +134,9 @@ void ShadeQuads(
         uint meshID = id >> 16;
         uint primID = id & 0xffff;
 
-        RayTraceMeshInfo mesh = g_meshInfo[meshID];
+        Triangle tri = triFetch(meshID, primID);
 
-        uint3 indices = Load3x16BitIndices(mesh.indexOffset + primID * 3 * 2);
-
-        Triangle tri;
-        tri.v0 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.x * mesh.attrStride));
-        tri.v1 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.y * mesh.attrStride));
-        tri.v2 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.z * mesh.attrStride));
-
-        float4 uvwt = TestRayTriangle(rayOrigin, rayDir, tri);
+        float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
 
         if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
             uvwt.w < nearestUVWT.w)
@@ -163,13 +149,16 @@ void ShadeQuads(
     if (nearestID == ~uint(0))
     {
         // no hit
-        g_screenOutput[dispatchThreadID.xy] = float4(1, 0, 1, 1);
+        g_screenOutput[uint2(pixelX, pixelY)] = float4(1, 0, 1, 1);
         return;
     }
 
     uint meshID = nearestID >> 16;
     uint primID = nearestID & 0xffff;
-    float4 outColor = Shade(pixelDimX, pixelDimY, pixelX, pixelY, rayOrigin, rayDir, meshID, primID, nearestUVWT);
+    float4 outColor = Shade(
+        threadID,
+        pixelDimX, pixelDimY, pixelX, pixelY,
+        rayOrigin, rayDir, meshID, primID, nearestUVWT);
 
-    g_screenOutput[dispatchThreadID.xy] = outColor;
+    g_screenOutput[uint2(pixelX, pixelY)] = outColor;
 }

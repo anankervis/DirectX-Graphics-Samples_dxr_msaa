@@ -64,11 +64,13 @@ MRT main(VSOutput vsOutput)
     float3x3 tbn = float3x3(normalize(vsOutput.tangent), normalize(vsOutput.bitangent), normalize(vsOutput.normal));
     normal = normalize(mul(normal, tbn));
 
+    float specularMask = 0; // TODO: read the texture
+
     mrt.Color = Shade(
         texDiffuse.Sample(sampler0, vsOutput.uv),
         shadeConstants.ambientColor,
         float3(0.56, 0.56, 0.56),
-        texSpecular.Sample(sampler0, vsOutput.uv).g,
+        specularMask,
         gloss,
         normal,
         normalize(vsOutput.viewDir),

@@ -200,6 +200,7 @@
     <ClInclude Include="Shaders\RayCommon.h" />
     <ClInclude Include="Shaders\ModelViewerRS.h" />
     <ClInclude Include="Shaders\Shading.h" />
+    <ClInclude Include="Shaders\TriFetch.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\..\MiniEngine\Core\Core_VS16.vcxproj">
