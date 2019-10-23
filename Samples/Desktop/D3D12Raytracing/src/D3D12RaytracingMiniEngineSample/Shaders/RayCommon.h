@@ -111,19 +111,19 @@ float2 GetUVAttribute(uint byteOffset)
 }
 
 inline void GenerateCameraRay(
-    uint2 tileDim,
-    uint2 tilePos,
+    uint2 pixelDim,
+    uint2 pixelPos,
     out float3 origin,
     out float3 direction)
 {
-    float2 xy = tilePos + 0.5; // center in the middle of the pixel
-    float2 screenPos = xy / float2(tileDim) * 2.0 - 1.0;
+    float2 xy = pixelPos + 0.5; // center in the middle of the pixel
+    float2 screenPos = xy / float2(pixelDim) * 2.0 - 1.0;
 
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;
 
     origin = dynamicConstants.worldCameraPosition;
-    direction = mul(dynamicConstants.cameraToWorld, float4(screenPos, -1, 0)).xyz;
+    direction = mul((float3x3)dynamicConstants.cameraToWorld, float3(screenPos, -1));
 }
 
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)

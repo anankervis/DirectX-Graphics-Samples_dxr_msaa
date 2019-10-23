@@ -152,7 +152,7 @@ void ShadeQuads(
 
         float4 uvwt = TestRayTriangle(rayOrigin, rayDir, tri);
 
-        if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 && uvwt.w >= 0 &&
+        if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
             uvwt.w < nearestUVWT.w)
         {
             nearestUVWT = uvwt;
@@ -172,22 +172,4 @@ void ShadeQuads(
     float4 outColor = Shade(pixelDimX, pixelDimY, pixelX, pixelY, rayOrigin, rayDir, meshID, primID, nearestUVWT);
 
     g_screenOutput[dispatchThreadID.xy] = outColor;
-
-//g_screenOutput[dispatchThreadID.xy] = float4(0, meshID / 32.0f, 0, 1);
-//g_screenOutput[dispatchThreadID.xy] = float4(0, (g_tileTris[tileIndex].id[0] & 0xffff) / 1024.0f, 0, 1);
-
-/*g_screenOutput[dispatchThreadID.xy] = float4(0,
-    Load3x16BitIndices(
-        g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].indexOffset + 3 * 2 * (g_tileTris[tileIndex].id[0] & 0xffff)
-    ).x % 16 / 16.0f, 0, 1);*/
-
-/*g_screenOutput[dispatchThreadID.xy] = float4(0,
-    fmod(asfloat(g_attributes.Load3(g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].attrOffsetPos +
-        Load3x16BitIndices(
-            g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].indexOffset + 3 * 2 * (g_tileTris[tileIndex].id[0] & 0xffff)
-        ).x * g_meshInfo[g_tileTris[tileIndex].id[0] >> 16].attrStride)).x * .01f + 1000.0f, 1.0f)
-    , 0, 1);*/
-
-//g_screenOutput[dispatchThreadID.xy] = float4(fmod(rayOrigin * .0001f + 1000.0f, 1.0f), 1);
-//g_screenOutput[dispatchThreadID.xy] = float4(rayDir * .5f + .5f, 1);
 }

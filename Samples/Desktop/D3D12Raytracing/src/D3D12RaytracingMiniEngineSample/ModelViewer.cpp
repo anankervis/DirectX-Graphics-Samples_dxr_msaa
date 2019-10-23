@@ -82,7 +82,6 @@ struct BVH
 BVH g_bvhTriangles;
 BVH g_bvhAABBs;
 
-DynamicCB           g_dynamicCb;
 CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
 CComPtr<ID3D12RootSignature> g_LocalRaytracingRootSignature;
 
@@ -473,8 +472,6 @@ void SetPipelineStateStackSize(LPCWSTR raygen, LPCWSTR closestHit, LPCWSTR miss,
 
 void DxrMsaaDemo::InitializeRaytracingStateObjects()
 {
-    ZeroMemory(&g_dynamicCb, sizeof(g_dynamicCb));
-
     D3D12_STATIC_SAMPLER_DESC staticSamplerDescs[1] = {};
     D3D12_STATIC_SAMPLER_DESC &defaultSampler = staticSamplerDescs[0];
     defaultSampler.Filter = D3D12_FILTER_ANISOTROPIC;
@@ -1198,7 +1195,7 @@ void DxrMsaaDemo::RaytraceDiffuse(
     ScopedTimer _p0(L"RaytraceDiffuse", context);
 
     // Prepare constants
-    DynamicCB inputs = g_dynamicCb;
+    DynamicCB inputs = {};
     Matrix4 viewToWorld = 
         Matrix4::MakeScale(Vector3(1.0f / camera.GetProjMatrix().GetX().GetX(), 1.0f / camera.GetProjMatrix().GetY().GetY(), 1.0f)) *
         Transpose(Invert(camera.GetViewMatrix()));
@@ -1218,7 +1215,6 @@ void DxrMsaaDemo::RaytraceDiffuse(
     context.FlushResourceBarriers();
 
     ID3D12GraphicsCommandList * pCommandList = context.GetCommandList();
-
     CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
     pCommandList->QueryInterface(IID_PPV_ARGS(&pRaytracingCommandList));
 
@@ -1245,7 +1241,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     ScopedTimer _p0(L"RaytraceDiffuseBeams", context);
 
     // Prepare constants
-    DynamicCB inputs = g_dynamicCb;
+    DynamicCB inputs = {};
     Matrix4 viewToWorld = 
         Matrix4::MakeScale(Vector3(1.0f / camera.GetProjMatrix().GetX().GetX(), 1.0f / camera.GetProjMatrix().GetY().GetY(), 1.0f)) *
         Transpose(Invert(camera.GetViewMatrix()));
@@ -1271,7 +1267,6 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.ClearUAV(m_tileTriCounts);
 
     ID3D12GraphicsCommandList* pCommandList = context.GetCommandList();
-
     CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
     pCommandList->QueryInterface(IID_PPV_ARGS(&pRaytracingCommandList));
 

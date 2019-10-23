@@ -169,6 +169,9 @@
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Release|x64'">6.3</ShaderModel>
       <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">ShadeQuads</EntryPointName>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">6.3</ShaderModel>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-Zpr %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Zpr %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Profile|x64'">-Zpr %(AdditionalOptions)</AdditionalOptions>
     </FxCompile>
     <FxCompile Include="Shaders\RaysLib.hlsl">
       <ShaderType>Library</ShaderType>
