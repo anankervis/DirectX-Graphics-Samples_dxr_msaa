@@ -5,6 +5,8 @@
 #include "Shading.h"
 #include "TriFetch.h"
 
+#define QUAD_READ_GROUPSHARED_FALLBACK 1
+
 cbuffer b0 : register(b0)
 {
     ShadeConstants shadeConstants;
@@ -12,7 +14,9 @@ cbuffer b0 : register(b0)
 
 Texture2D<float4> g_materialTextures[] : register(t100);
 
+#if QUAD_READ_GROUPSHARED_FALLBACK
 groupshared float2 tileUVs[TILE_SIZE];
+#endif
 
 float4 Shade(
     uint threadID, // for groupshared fallback
@@ -23,14 +27,7 @@ float4 Shade(
     uint materialID = g_meshInfo[meshID].materialID;
     TriInterpolated tri = triFetchAndInterpolate(meshID, primID, uvwt.xyz);
 
-    // Bug: well, no surprise, these don't work in compute shaders, even though they were spec'd to.
-    // Response from Tex at MSFT: Known issue that will be fixed in Vibranium (Spring 2020).
-    // Current GitHub master build has this fixed, but you still need a new DXIL.dll for signed shaders
-    // for the whole thing to work...
-    //float2 uv00 = QuadReadLaneAt(tri.uv, 0);
-    //float2 uv10 = QuadReadLaneAt(tri.uv, 1);
-    //float2 uv01 = QuadReadLaneAt(tri.uv, 2);
-
+#if QUAD_READ_GROUPSHARED_FALLBACK
     // groupshared fallback
     tileUVs[threadID] = tri.uv;
     GroupMemoryBarrierWithGroupSync();
@@ -38,6 +35,16 @@ float4 Shade(
     float2 uv00 = tileUVs[threadID00 + 0];
     float2 uv10 = tileUVs[threadID00 + 1];
     float2 uv01 = tileUVs[threadID00 + 2];
+#else
+    // Doesn't work in compute shaders (it's spec'd to), unless you disable validation in the HLSL compiler
+    // and enable D3D12ExperimentalShaderModels prior to device creation.
+    // Response from Tex at MSFT: Known issue that will be fixed in Vibranium (Spring 2020).
+    // Current GitHub master build has this fixed, but you still need a new DXIL.dll for signed shaders
+    // for the whole thing to work...
+    float2 uv00 = QuadReadLaneAt(tri.uv, 0);
+    float2 uv10 = QuadReadLaneAt(tri.uv, 1);
+    float2 uv01 = QuadReadLaneAt(tri.uv, 2);
+#endif
 
     float2 uvDx = uv10 - uv00;
     float2 uvDy = uv01 - uv00;
@@ -71,8 +78,7 @@ float4 Shade(
     return float4(outputColor, 1);
 }
 
-// this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader...
-// ...if the intrinsics weren't currently disallowed (known issue, see above)
+// this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader
 void threadIndexToQuadSwizzle(uint threadID, out uint localX, out uint localY)
 {
     // address bit layout (high to low) for an 8x8 tile: yyxxyx

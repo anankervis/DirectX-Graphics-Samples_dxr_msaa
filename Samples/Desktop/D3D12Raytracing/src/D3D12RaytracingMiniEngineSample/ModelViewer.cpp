@@ -260,6 +260,15 @@ inline bool IsDirectXRaytracingSupported(IDXGIAdapter1* adapter)
 
 int wmain(int argc, wchar_t** argv)
 {
+    /*if (FAILED(D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr)))
+    {
+        // Note - this requires enabling "Developer Mode" on your computer.
+        // I'm using this to allow running a shader with HLSL validation disabled, due to a bug that'll be fixed in
+        // the Spring 2020 Windows release.
+        printf("failed to enable experimental shader mode\n");
+        return -1;
+    }*/
+
     // disable scaling of the output window
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 
