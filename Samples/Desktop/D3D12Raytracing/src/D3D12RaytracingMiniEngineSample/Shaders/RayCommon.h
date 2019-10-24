@@ -20,6 +20,18 @@
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
 #define TILE_MAX_TRIS 512
 
+#define QUAD_DIM_X 2
+#define QUAD_DIM_Y 2
+#define QUAD_SIZE (QUAD_DIM_X * QUAD_DIM_Y)
+#define QUADS_PER_TILE_X (TILE_DIM_X / QUAD_DIM_X)
+#define QUADS_PER_TILE_Y (TILE_DIM_Y / QUAD_DIM_Y)
+#define QUADS_PER_TILE (QUADS_PER_TILE_X * QUADS_PER_TILE_Y)
+
+#define MAX_TRIS_PER_QUAD (QUAD_SIZE * AA_SAMPLES)
+#define MAX_SHADE_QUADS_PER_TILE (MAX_TRIS_PER_QUAD * QUADS_PER_TILE)
+
+#define BAD_TRI_ID (~uint(0))
+
 struct TileTri
 {
     uint id[TILE_MAX_TRIS]; // mesh + primitive IDs

@@ -43,6 +43,9 @@
     <ClInclude Include="Shaders\RayGen.h">
       <Filter>Shaders</Filter>
     </ClInclude>
+    <ClInclude Include="Shaders\Sort.h">
+      <Filter>Shaders</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Textures\Models\background.DDS">

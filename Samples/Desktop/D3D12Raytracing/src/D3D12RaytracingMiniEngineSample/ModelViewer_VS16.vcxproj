@@ -201,6 +201,7 @@
     <ClInclude Include="Shaders\ModelViewerRS.h" />
     <ClInclude Include="Shaders\RayGen.h" />
     <ClInclude Include="Shaders\Shading.h" />
+    <ClInclude Include="Shaders\Sort.h" />
     <ClInclude Include="Shaders\TriFetch.h" />
   </ItemGroup>
   <ItemGroup>
