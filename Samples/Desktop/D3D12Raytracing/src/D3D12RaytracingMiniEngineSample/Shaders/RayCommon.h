@@ -5,12 +5,14 @@
 #endif
 
 #define QUAD_READ_GROUPSHARED_FALLBACK 1
+// Note that the AABBs are enlarged to be conservative from the original camera viewpoint,
+// and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
-#define TILE_DIM_LOG2 3
+#define TILE_DIM_LOG2 3 // 8x8
 #define TILE_DIM (1 << TILE_DIM_LOG2)
 #define TILE_SIZE (TILE_DIM * TILE_DIM)
-#define TILE_MAX_TRIS 256
+#define TILE_MAX_TRIS 512
 
 struct TileTri
 {
