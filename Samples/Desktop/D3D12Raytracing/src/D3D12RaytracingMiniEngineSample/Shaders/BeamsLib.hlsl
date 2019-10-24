@@ -1,6 +1,7 @@
 #define HLSL
 
 #include "RayCommon.h"
+#include "RayGen.h"
 
 struct HitAttribs
 {

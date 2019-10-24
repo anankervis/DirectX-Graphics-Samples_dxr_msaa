@@ -199,6 +199,7 @@
     <ClInclude Include="Shaders\Intersect.h" />
     <ClInclude Include="Shaders\RayCommon.h" />
     <ClInclude Include="Shaders\ModelViewerRS.h" />
+    <ClInclude Include="Shaders\RayGen.h" />
     <ClInclude Include="Shaders\Shading.h" />
     <ClInclude Include="Shaders\TriFetch.h" />
   </ItemGroup>

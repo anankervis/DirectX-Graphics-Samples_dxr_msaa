@@ -2,6 +2,7 @@
 
 #include "Intersect.h"
 #include "RayCommon.h"
+#include "RayGen.h"
 #include "Shading.h"
 #include "TriFetch.h"
 
@@ -62,7 +63,7 @@ float4 Shade(
     normal = normalize(mul(normal, tbn));
 
     float3 viewDir = normalize(-rayDir);
-    float specularMask = 0; // TODO: read the texture
+    float specularMask = .1; // TODO: read the texture
 
     float3 outputColor = Shade(
         diffuseColor,
