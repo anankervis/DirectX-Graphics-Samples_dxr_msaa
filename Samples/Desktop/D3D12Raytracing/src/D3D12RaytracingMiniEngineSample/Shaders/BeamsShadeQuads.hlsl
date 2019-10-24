@@ -17,14 +17,13 @@ Texture2D<float4> g_materialTextures[] : register(t100);
 groupshared float2 tileUVs[TILE_SIZE];
 #endif
 
-float4 Shade(
+float3 ShadeQuadThread(
     uint threadID, // for groupshared fallback
-    uint pixelDimX, uint pixelDimY, uint pixelX, uint pixelY,
-    float3 rayOrigin, float3 rayDir, uint meshID, uint primID, float4 uvwt
+    float3 rayDir, uint meshID, uint primID, float3 uvw
 )
 {
     uint materialID = g_meshInfo[meshID].materialID;
-    TriInterpolated tri = triFetchAndInterpolate(meshID, primID, uvwt.xyz);
+    TriInterpolated tri = triFetchAndInterpolate(meshID, primID, uvw);
 
 #if QUAD_READ_GROUPSHARED_FALLBACK
     // groupshared fallback
@@ -74,7 +73,7 @@ float4 Shade(
         shadeConstants.sunDirection,
         shadeConstants.sunColor);
 
-    return float4(outputColor, 1);
+    return outputColor;
 }
 
 // this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader
@@ -127,12 +126,15 @@ void ShadeQuads(
         return;
     }
 
-    float3 rayOrigin;
-    float3 rayDir;
-    GenerateCameraRay(uint2(pixelDimX, pixelDimY), uint2(pixelX, pixelY), rayOrigin, rayDir);
+    uint s;
+    float nearestT[AA_SAMPLES];
+    uint nearestID[AA_SAMPLES];
+    for (s = 0; s < AA_SAMPLES; s++)
+    {
+        nearestT[s] = FLT_MAX;
+        nearestID[s] = ~uint(0);
+    }
 
-    float4 nearestUVWT = FLT_MAX;
-    uint nearestID = ~uint(0);
     for (uint tileTriIndex = 0; tileTriIndex < tileTriCount; tileTriIndex++)
     {
         uint id = g_tileTris[tileIndex].id[tileTriIndex];
@@ -140,30 +142,50 @@ void ShadeQuads(
         uint primID = id & 0xffff;
 
         Triangle tri = triFetch(meshID, primID);
-
-        float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
-
-        if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
-            uvwt.w < nearestUVWT.w)
+        
+        for (s = 0; s < AA_SAMPLES; s++)
         {
-            nearestUVWT = uvwt;
-            nearestID = id;
+            float3 rayOrigin;
+            float3 rayDir;
+            GenerateCameraRay(
+                uint2(pixelDimX, pixelDimY),
+                float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
+                rayOrigin, rayDir);
+
+            float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
+
+            if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
+                uvwt.w < nearestT[s])
+            {
+                nearestT[s] = uvwt.w;
+                nearestID[s] = id;
+            }
         }
     }
 
-    if (nearestID == ~uint(0))
+    float3 outColor = 0;
+    for (s = 0; s < AA_SAMPLES; s++)
     {
-        // no hit
-        g_screenOutput[uint2(pixelX, pixelY)] = float4(1, 0, 1, 1);
-        return;
+        if (nearestID[s] == ~uint(0))
+            continue; // no hit
+
+        float3 rayOrigin;
+        float3 rayDir;
+        GenerateCameraRay(
+            uint2(pixelDimX, pixelDimY),
+            float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
+            rayOrigin, rayDir);
+
+        uint meshID = nearestID[s] >> 16;
+        uint primID = nearestID[s] & 0xffff;
+
+        Triangle tri = triFetch(meshID, primID);
+        float3 uvw = triIntersectNoFail(rayOrigin, rayDir, tri).xyz;
+
+        outColor += ShadeQuadThread(
+            threadID,
+            rayDir, meshID, primID, uvw);
     }
 
-    uint meshID = nearestID >> 16;
-    uint primID = nearestID & 0xffff;
-    float4 outColor = Shade(
-        threadID,
-        pixelDimX, pixelDimY, pixelX, pixelY,
-        rayOrigin, rayDir, meshID, primID, nearestUVWT);
-
-    g_screenOutput[uint2(pixelX, pixelY)] = outColor;
+    g_screenOutput[uint2(pixelX, pixelY)] = float4(outColor / AA_SAMPLES, 1);
 }
