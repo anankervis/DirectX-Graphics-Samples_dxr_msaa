@@ -9,6 +9,9 @@
 // and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
+#define AA_SAMPLES 16
+#define AA_SAMPLE_OFFSET_TABLE sampleOffset16x
+
 #define TILE_DIM_LOG2 3 // 8x8
 #define TILE_DIM (1 << TILE_DIM_LOG2)
 #define TILE_SIZE (TILE_DIM * TILE_DIM)
@@ -48,10 +51,14 @@ struct RootConstants
 
 struct RayPayload
 {
-    uint pad;
+    float3 color;
 };
 
 struct BeamPayload
+{
+    uint pad;
+};
+struct BeamHitAttribs
 {
     uint pad;
 };

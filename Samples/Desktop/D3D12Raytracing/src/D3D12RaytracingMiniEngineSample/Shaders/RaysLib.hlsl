@@ -81,7 +81,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         shadeConstants.sunDirection,
         shadeConstants.sunColor);
 
-    g_screenOutput[DispatchRaysIndex().xy] = float4(outputColor, 1);
+    payload.color += outputColor;
 }
 
 [shader("miss")]
@@ -93,18 +93,27 @@ void Miss(inout RayPayload payload)
 [shader("raygeneration")]
 void RayGen()
 {
-    float3 origin, direction;
-    GenerateCameraRay(DispatchRaysDimensions().xy, DispatchRaysIndex().xy, origin, direction);
-
-    RayDesc rayDesc =
-    {
-        origin,
-        0.0f,
-        direction,
-        FLT_MAX
-    };
-
     RayPayload payload;
+    payload.color = float3(0, 0, 0);
 
-    TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+    for (uint s = 0; s < AA_SAMPLES; s++)
+    {
+        float3 origin, direction;
+        GenerateCameraRay(
+            DispatchRaysDimensions().xy,
+            DispatchRaysIndex().xy + AA_SAMPLE_OFFSET_TABLE[s],
+            origin, direction);
+
+        RayDesc rayDesc =
+        {
+            origin,
+            0.0f,
+            direction,
+            FLT_MAX
+        };
+
+        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+    }
+
+    g_screenOutput[DispatchRaysIndex().xy] = float4(payload.color / AA_SAMPLES, 1);
 }

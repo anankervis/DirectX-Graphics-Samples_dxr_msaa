@@ -646,7 +646,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     // beam shaders
     {
         D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
-        shaderConfig.MaxAttributeSizeInBytes = 8;
+        shaderConfig.MaxAttributeSizeInBytes = sizeof(BeamHitAttribs);
         shaderConfig.MaxPayloadSizeInBytes = sizeof(BeamPayload);
 
         D3D12_EXPORT_DESC exportDesc[] =

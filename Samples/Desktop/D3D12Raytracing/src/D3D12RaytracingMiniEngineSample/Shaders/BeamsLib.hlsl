@@ -3,10 +3,6 @@
 #include "RayCommon.h"
 #include "RayGen.h"
 
-struct HitAttribs
-{
-};
-
 /*
 Record the triangle and move on. We'll compute coverage later.
 
@@ -17,7 +13,7 @@ Single-pixel rays w/ MSAA can be treated as a collection of 2, 4, 8, 16 subrays 
 Beams represent the conservative volume, which may be a collection of pixels or a spatial query.
 */
 [shader("anyhit")]
-void AnyHit(inout BeamPayload payload, in HitAttribs attr)
+void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {
     uint tileX = DispatchRaysIndex().x;
     uint tileY = DispatchRaysIndex().y;
@@ -39,7 +35,7 @@ void Intersection()
 {
     float tHitAABB = RayTCurrent();
 
-    HitAttribs attr;
+    BeamHitAttribs attr;
 
     ReportHit(tHitAABB, 0, attr);
 }
