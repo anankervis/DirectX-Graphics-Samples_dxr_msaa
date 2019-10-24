@@ -1011,8 +1011,8 @@ void DxrMsaaDemo::Startup()
     // beam buffers
     {
         // we'll just keep it simple for the demo and round down
-        m_tilesX = g_SceneColorBuffer.GetWidth() / TILE_DIM;
-        m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_DIM;
+        m_tilesX = g_SceneColorBuffer.GetWidth() / TILE_DIM_X;
+        m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_DIM_Y;
         uint32_t tileCount = m_tilesX * m_tilesY;
 
         m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);

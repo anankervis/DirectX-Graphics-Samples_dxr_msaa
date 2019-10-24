@@ -79,10 +79,11 @@ float3 ShadeQuadThread(
 // this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader
 void threadIndexToQuadSwizzle(uint threadID, out uint localX, out uint localY)
 {
-    // address bit layout (high to low) for an 8x8 tile: yyxxyx
-    uint tileDimMask = (1 << TILE_DIM_LOG2) - 1;
-    localX = (((threadID >> 2                  ) << 1) | ( threadID       & 1)) & tileDimMask;
-    localY = (((threadID >> (1 + TILE_DIM_LOG2)) << 1) | ((threadID >> 1) & 1)) & tileDimMask;
+    // address bit layout (high to low)
+    // 8x8 tile: yyxxyx
+    // 8x4 tile:  yxxyx
+    localX = (((threadID >> 2                    ) << 1) | ( threadID       & 1)) & ((1 << TILE_DIM_LOG2_X) - 1);
+    localY = (((threadID >> (1 + TILE_DIM_LOG2_X)) << 1) | ((threadID >> 1) & 1)) & ((1 << TILE_DIM_LOG2_Y) - 1);
 }
 
 [numthreads(TILE_SIZE, 1, 1)]
@@ -107,10 +108,10 @@ void ShadeQuads(
     uint localX;
     uint localY;
     threadIndexToQuadSwizzle(threadID, localX, localY);
-    uint pixelX = tileX * TILE_DIM + localX;
-    uint pixelY = tileY * TILE_DIM + localY;
-    uint pixelDimX = dynamicConstants.tilesX * TILE_DIM;
-    uint pixelDimY = dynamicConstants.tilesY * TILE_DIM;
+    uint pixelX = tileX * TILE_DIM_X + localX;
+    uint pixelY = tileY * TILE_DIM_Y + localY;
+    uint pixelDimX = dynamicConstants.tilesX * TILE_DIM_X;
+    uint pixelDimY = dynamicConstants.tilesY * TILE_DIM_Y;
 
     uint tileTriCount = g_tileTriCounts[tileIndex];
     if (tileTriCount <= 0)

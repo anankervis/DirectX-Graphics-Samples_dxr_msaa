@@ -12,9 +12,12 @@
 #define AA_SAMPLES 16
 #define AA_SAMPLE_OFFSET_TABLE sampleOffset16x
 
-#define TILE_DIM_LOG2 3 // 8x8
-#define TILE_DIM (1 << TILE_DIM_LOG2)
-#define TILE_SIZE (TILE_DIM * TILE_DIM)
+// 8x4 tiles
+#define TILE_DIM_LOG2_X 3
+#define TILE_DIM_LOG2_Y 2
+#define TILE_DIM_X (1 << TILE_DIM_LOG2_X)
+#define TILE_DIM_Y (1 << TILE_DIM_LOG2_Y)
+#define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
 #define TILE_MAX_TRIS 512
 
 struct TileTri
