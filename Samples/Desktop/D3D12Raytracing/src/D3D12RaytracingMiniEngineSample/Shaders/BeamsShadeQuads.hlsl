@@ -60,7 +60,7 @@ float4 Shade(
         normalize(tri.normal));
     normal = normalize(mul(normal, tbn));
 
-    float3 viewDir = normalize(-rayDir);
+    float3 viewDir = normalize(rayDir);
     float specularMask = .1; // TODO: read the texture
 
     float3 outputColor = Shade(

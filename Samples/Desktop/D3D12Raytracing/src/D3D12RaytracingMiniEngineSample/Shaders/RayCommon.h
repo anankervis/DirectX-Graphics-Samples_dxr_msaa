@@ -19,7 +19,7 @@
 
 struct TileTri
 {
-    uint id[TILE_MAX_TRIS]; // material + primitive IDs
+    uint id[TILE_MAX_TRIS]; // mesh + primitive IDs
 };
 
 struct RayTraceMeshInfo
