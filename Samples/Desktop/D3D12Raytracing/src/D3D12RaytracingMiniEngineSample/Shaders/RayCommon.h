@@ -4,6 +4,9 @@
 # include "HlslCompat.h"
 #endif
 
+#define QUAD_READ_GROUPSHARED_FALLBACK 1
+#define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
+
 #define TILE_DIM_LOG2 3
 #define TILE_DIM (1 << TILE_DIM_LOG2)
 #define TILE_SIZE (TILE_DIM * TILE_DIM)

@@ -260,14 +260,16 @@ inline bool IsDirectXRaytracingSupported(IDXGIAdapter1* adapter)
 
 int wmain(int argc, wchar_t** argv)
 {
-    /*if (FAILED(D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr)))
+#if QUAD_READ_GROUPSHARED_FALLBACK == 0
+    if (FAILED(D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr)))
     {
         // Note - this requires enabling "Developer Mode" on your computer.
         // I'm using this to allow running a shader with HLSL validation disabled, due to a bug that'll be fixed in
         // the Spring 2020 Windows release.
         printf("failed to enable experimental shader mode\n");
         return -1;
-    }*/
+    }
+#endif
 
     // disable scaling of the output window
     SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
@@ -726,8 +728,20 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 // TODO: could pair up triangles
 void DxrMsaaDemo::createAABBs()
 {
-    uint32_t meshCount = m_Model.m_Header.meshCount;
+    Matrix4 viewToWorld = 
+        Matrix4::MakeScale(
+            Vector3(
+                1.0f / m_Camera.GetProjMatrix().GetX().GetX(),
+                1.0f / m_Camera.GetProjMatrix().GetY().GetY(),
+                1.0f)) *
+        Transpose(Invert(m_Camera.GetViewMatrix()));
 
+    Vector3 d00 = Matrix3(viewToWorld) * Vector3(-1, -1, -1);
+    Vector3 d10 = Matrix3(viewToWorld) * Vector3(-1 + 2.0f / m_tilesX, -1, -1);
+    Vector3 d01 = Matrix3(viewToWorld) * Vector3(-1, -1 + 2.0f / m_tilesY, -1);
+    float maxTileSize = max(Length(d10 - d00), Length(d01 - d00));
+
+    uint32_t meshCount = m_Model.m_Header.meshCount;
     std::vector<D3D12_RAYTRACING_AABB> aabbs;
     for (uint32_t m = 0; m < m_Model.m_Header.meshCount; m++)
     {
@@ -764,6 +778,39 @@ void DxrMsaaDemo::createAABBs()
                 max(v[0][1], max(v[1][1], v[2][1])),
                 max(v[0][2], max(v[1][2], v[2][2])),
             };
+
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+            float camPosX = m_Camera.GetPosition().GetX();
+            float camPosY = m_Camera.GetPosition().GetY();
+            float camPosZ = m_Camera.GetPosition().GetZ();
+
+            float aabbCenterX = (aabb.MinX + aabb.MaxX) * .5f;
+            float aabbCenterY = (aabb.MinY + aabb.MaxY) * .5f;
+            float aabbCenterZ = (aabb.MinZ + aabb.MaxZ) * .5f;
+
+            float centerDeltaX = aabbCenterX - camPosX;
+            float centerDeltaY = aabbCenterY - camPosY;
+            float centerDeltaZ = aabbCenterZ - camPosZ;
+
+            float aabbPPointX = centerDeltaX < 0 ? aabb.MinX : aabb.MaxX;
+            float aabbPPointY = centerDeltaY < 0 ? aabb.MinY : aabb.MaxY;
+            float aabbPPointZ = centerDeltaZ < 0 ? aabb.MinZ : aabb.MaxZ;
+
+            float dx = aabbPPointX - camPosX;
+            float dy = aabbPPointY - camPosY;
+            float dz = aabbPPointZ - camPosZ;
+            float d = sqrtf(dx * dx + dy * dy + dz * dz);
+
+            float tileSizeAtD = maxTileSize * d;
+            float expansion = tileSizeAtD * .3f; // hmmm... I was expecting .5 * tileSize, but .3 seems to work...
+
+            aabb.MinX -= expansion;
+            aabb.MinY -= expansion;
+            aabb.MinZ -= expansion;
+            aabb.MaxX += expansion;
+            aabb.MaxY += expansion;
+            aabb.MaxZ += expansion;
+#endif
 
             aabbs.push_back(aabb);
         }
@@ -950,15 +997,16 @@ void DxrMsaaDemo::Startup()
     ASSERT(bModelLoadSuccess, "Failed to load model");
     ASSERT(m_Model.m_Header.meshCount > 0, "Model contains no meshes");
 
+    float modelRadius = Length(m_Model.m_Header.boundingBox.max - m_Model.m_Header.boundingBox.min) * .5f;
+    const Vector3 eye = (m_Model.m_Header.boundingBox.min + m_Model.m_Header.boundingBox.max) * .5f + Vector3(modelRadius * .5f, 0.0f, 0.0f);
+    m_Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
+    m_Camera.SetZRange( 1.0f, 10000.0f );
+    m_Camera.Update();
+
     g_shadeConstantBuffer.Create(L"Hit Constant Buffer", 1, sizeof(ShadeConstants));
     g_dynamicConstantBuffer.Create(L"Dynamic Constant Buffer", 1, sizeof(DynamicCB));
 
     InitializeSceneInfo();
-
-    createAABBs();
-    
-    createBvh(g_bvhTriangles, true);
-    createBvh(g_bvhAABBs, false);
 
     // beam buffers
     {
@@ -971,12 +1019,14 @@ void DxrMsaaDemo::Startup()
         m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
     }
 
+    // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
+    createAABBs();
+    
+    createBvh(g_bvhTriangles, true);
+    createBvh(g_bvhAABBs, false);
+
     InitializeViews();
     InitializeRaytracingStateObjects();
-
-    float modelRadius = Length(m_Model.m_Header.boundingBox.max - m_Model.m_Header.boundingBox.min) * .5f;
-    const Vector3 eye = (m_Model.m_Header.boundingBox.min + m_Model.m_Header.boundingBox.max) * .5f + Vector3(modelRadius * .5f, 0.0f, 0.0f);
-    m_Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
     
     m_CameraPosArrayCurrentPosition = 0;
     
@@ -1004,8 +1054,6 @@ void DxrMsaaDemo::Startup()
     m_CameraPosArray[4].position = Vector3(-1463.0f, 600.0f, 394.52f);
     m_CameraPosArray[4].heading = -1.236f;
     m_CameraPosArray[4].pitch = 0.0f;
-
-    m_Camera.SetZRange( 1.0f, 10000.0f );
 
     m_CameraController.reset(new CameraController(m_Camera, Vector3(kYUnitVector)));
     

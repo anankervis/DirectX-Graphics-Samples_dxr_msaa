@@ -6,8 +6,6 @@
 #include "Shading.h"
 #include "TriFetch.h"
 
-#define QUAD_READ_GROUPSHARED_FALLBACK 1
-
 cbuffer b0 : register(b0)
 {
     ShadeConstants shadeConstants;
