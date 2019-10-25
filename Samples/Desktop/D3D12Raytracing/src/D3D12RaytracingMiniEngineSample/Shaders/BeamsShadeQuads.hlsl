@@ -237,6 +237,7 @@ void ShadeQuads(
             }
             else
             {
+// TODO: indexing into registers might result in bad code gen... emit to groupshared or main memory list of quads
                 // we found a new triangle ID, emit the existing compressed sample pair and start a new one
                 shadePixels[compTriCount - 1] = shadePixel;
 
