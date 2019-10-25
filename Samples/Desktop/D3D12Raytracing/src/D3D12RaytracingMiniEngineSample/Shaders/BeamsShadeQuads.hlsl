@@ -25,9 +25,12 @@ struct ShadePixel
     uint sampleMask;
 };
 
+//#define SORT_SIZE AA_SAMPLES
+//#define SORT_T ShadePixel
+//#define SORT_CMP_LESS(a, b) (a.id < b.id)
 #define SORT_SIZE AA_SAMPLES
-#define SORT_T ShadePixel
-#define SORT_CMP_LESS(a, b) (a.id < b.id)
+#define SORT_T uint
+#define SORT_CMP_LESS(a, b) (a < b)
 #include "Sort.h"
 
 struct ShadeQuad
@@ -186,51 +189,66 @@ void ShadeQuads(
         }
     }
 
-// TODO: do I actually need to track the sample mask, or just a count? That'd be less space.
-    // thread-local list of triangles to shade
-    ShadePixel shadePixel[AA_SAMPLES];
-    uint shadePixelCount = 0;
-    {for (uint s = 0; s < AA_SAMPLES; s++)
+    // fast path if all lanes hit 1 triangle
+    bool oneTri = true;
+    for (int i = 1; i < AA_SAMPLES; i++)
     {
-        shadePixel[s].id = BAD_TRI_ID;
-    }}
-    {for (uint s = 0; s < AA_SAMPLES; s++)
-    {
-        uint id = nearestID[s];
-        if (id == BAD_TRI_ID)
-            continue; // no hit
-
-        uint s2;
-        for (s2 = 0; s2 < shadePixelCount; s2++)
+        if (nearestID[0] != nearestID[i])
         {
-            if (shadePixel[s2].id == id)
+            oneTri = false;
+        }
+    }
+    bool oneTriPerLane = (WaveActiveCountBits(oneTri) == WaveGetLaneCount());
+
+    ShadePixel shadePixels[AA_SAMPLES];
+    if (oneTriPerLane)
+    {
+        // for all threads in the warp, only a single triangle is hit
+        // not necessarily the same triangle across threads, though
+        shadePixels[0].id = nearestID[0];
+        shadePixels[0].sampleMask = AA_SAMPLE_MASK;
+    }
+    else
+    {
+        // group hits on the same triangle together, and misses (BAD_TRI_ID) at the end
+        uint sortKeys[AA_SAMPLES];
+        enum { sortKeySampleMask = (1 << AA_SAMPLES_LOG2) - 1 };
+        // let's assume the max mesh count is 2^(16 - AA_SAMPLES_LOG2) - 1
+        // so we can stuff the sample ID and mesh+prim ID into the same 32-bit uint
+        {for (int i = 0; i < AA_SAMPLES; i++)
+        {
+            sortKeys[i] = (nearestID[i] << AA_SAMPLES_LOG2) | i;
+        }}
+        sortBitonic(sortKeys);
+
+        // scan and reduce down to pairs of (id, sampleMask)
+        ShadePixel shadePixel;
+        shadePixel.id = int(sortKeys[0]) >> AA_SAMPLES_LOG2; // shift with sign fill
+        shadePixel.sampleMask = 1 << (sortKeys[0] & sortKeySampleMask);
+        int compTriCount = 1;
+        {for (int i = 1; i < AA_SAMPLES; i++)
+        {
+            uint id = int(sortKeys[i]) >> AA_SAMPLES_LOG2;
+            uint triMask = 1 << (sortKeys[i] & sortKeySampleMask);
+
+            if (shadePixel.id == id)
             {
-                shadePixel[s2].sampleMask |= 1 << s;
-                break;
+                shadePixel.sampleMask |= triMask;
             }
-        }
+            else
+            {
+                // we found a new triangle ID, emit the existing compressed sample pair and start a new one
+                shadePixels[compTriCount - 1] = shadePixel;
 
-        // this triangle wasn't already in the list
-        if (s2 == shadePixelCount)
-        {
-            shadePixel[shadePixelCount].id = id;
-            shadePixel[shadePixelCount].sampleMask = 1 << s;
-            shadePixelCount++;
-        }
-    }}
+                shadePixel.id = id;
+                shadePixel.sampleMask = triMask;
+                compTriCount++;
+            }
+        }}
+        shadePixels[compTriCount - 1] = shadePixel;
+    }
 
-    // sort the compacted list
-    sortBitonic(shadePixel);
-
-    /*uint shadeQuadCount = 0;
-
-    uint quadID = threadID / QUAD_SIZE;
-    uint quadThreadIndex = threadID & (QUAD_SIZE - 1);
-
-    for (uint n = 0; n < shadePixelCount; n++)
-    {
-        uint id = shadePixel[n].id;
-    }*/
+// TODO: do I actually need to track the sample mask, or just a count? That'd be less space.
 
     // TODO: centroid
     float3 rayOriginShade;
@@ -246,12 +264,12 @@ void ShadeQuads(
     tileFramebuffer[threadID] = 0;
     GroupMemoryBarrierWithGroupSync();
 
-    for (uint n = 0; n < shadePixelCount; n++)
+    uint shadedMask = 0;
+    for (uint n = 0; n < AA_SAMPLES; n++)
     {
-        uint id = shadePixel[n].id;
-
+        uint id = shadePixels[n].id;
         if (id == BAD_TRI_ID)
-            continue; // no hit
+            break; // end of the list, some samples didn't hit anything
 
         uint meshID = id >> 16;
         uint primID = id & 0xffff;
@@ -259,12 +277,17 @@ void ShadeQuads(
         Triangle tri = triFetch(meshID, primID);
         float3 uvw = triIntersectNoFail(rayOriginShade, rayDirShade, tri).xyz;
 
-        uint sampleCount = countbits(shadePixel[n].sampleMask);
+        uint sampleMask = shadePixels[n].sampleMask;
+        uint sampleCount = countbits(sampleMask);
 
 // TODO: accum into the shade-quad's address, not our address
         tileFramebuffer[threadID] += sampleCount * ShadeQuadThread(
             threadID,
             rayDirShade, meshID, primID, uvw);
+
+        shadedMask |= sampleMask;
+        if (shadedMask == AA_SAMPLE_MASK)
+            break; // all samples have been shaded
     }
 
     GroupMemoryBarrierWithGroupSync();

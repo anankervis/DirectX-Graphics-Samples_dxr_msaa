@@ -9,8 +9,10 @@
 // and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
-#define AA_SAMPLES 16
+#define AA_SAMPLES_LOG2 4
+#define AA_SAMPLES (1 << AA_SAMPLES_LOG2)
 #define AA_SAMPLE_OFFSET_TABLE sampleOffset16x
+#define AA_SAMPLE_MASK ((uint(1) << AA_SAMPLES) - 1)
 
 // 8x4 tiles
 #define TILE_DIM_LOG2_X 3
