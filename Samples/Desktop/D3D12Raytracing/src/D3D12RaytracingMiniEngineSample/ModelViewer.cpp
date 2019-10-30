@@ -42,7 +42,8 @@
 #include "CompiledShaders/ModelViewerVS.h"
 #include "CompiledShaders/ModelViewerPS.h"
 #include "CompiledShaders/BeamsLib.h"
-#include "CompiledShaders/BeamsShadeQuads.h"
+#include "CompiledShaders/BeamsShade.h"
+#include "CompiledShaders/BeamsVis.h"
 #include "CompiledShaders/RaysLib.h"
 
 #include "Shaders/RayCommon.h"
@@ -86,7 +87,8 @@ CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
 CComPtr<ID3D12RootSignature> g_LocalRaytracingRootSignature;
 
 RootSignature g_BeamPostRootSig;
-ComputePSO g_BeamShadeQuadsPSO;
+ComputePSO g_BeamVisPSO;
+ComputePSO g_BeamShadePSO;
 
 enum class RenderMode
 {
@@ -233,6 +235,7 @@ private:
     uint32_t m_tilesY;
     StructuredBuffer m_tileTriCounts;
     StructuredBuffer m_tileTris;
+    StructuredBuffer m_tileShadeQuads;
 
     Vector3 m_SunDirection;
 
@@ -428,6 +431,9 @@ void DxrMsaaDemo::InitializeViews()
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
         Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileTris.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuads.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     {
@@ -712,16 +718,19 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         g_BeamPostRootSig.Reset(5, 1);
         g_BeamPostRootSig[0].InitAsConstantBuffer(0);
         g_BeamPostRootSig[1].InitAsConstantBuffer(1);
-        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 3);
+        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 4);
         g_BeamPostRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
         g_BeamPostRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 100, UINT_MAX);
         g_BeamPostRootSig.InitStaticSampler(0, DefaultSamplerDesc);
         g_BeamPostRootSig.Finalize(L"g_BeamPostRootSig");
 
-        g_BeamShadeQuadsPSO.SetRootSignature(g_BeamPostRootSig);
-        // looks like I need to split my compute shaders out into separate files
-        g_BeamShadeQuadsPSO.SetComputeShader(g_pBeamsShadeQuads, sizeof(g_pBeamsShadeQuads));
-        g_BeamShadeQuadsPSO.Finalize();
+        g_BeamVisPSO.SetRootSignature(g_BeamPostRootSig);
+        g_BeamVisPSO.SetComputeShader(g_pBeamsVis, sizeof(g_pBeamsVis));
+        g_BeamVisPSO.Finalize();
+
+        g_BeamShadePSO.SetRootSignature(g_BeamPostRootSig);
+        g_BeamShadePSO.SetComputeShader(g_pBeamsShade, sizeof(g_pBeamsShade));
+        g_BeamShadePSO.Finalize();
     }
 }
 
@@ -1017,6 +1026,7 @@ void DxrMsaaDemo::Startup()
 
         m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
         m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
+        m_tileShadeQuads.Create(L"m_tileShadeQuads", tileCount, sizeof(TileShadeQuads), nullptr);
     }
 
     // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
@@ -1319,6 +1329,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileTriCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileTris, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileShadeQuads, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.FlushResourceBarriers();
 
     context.ClearUAV(m_tileTriCounts);
@@ -1342,18 +1353,27 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Beam.m_pPSO);
     pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
 
+    // done with beam traversal, switch to post processing
     context.InsertUAVBarrier(m_tileTriCounts);
     context.InsertUAVBarrier(m_tileTris);
     context.FlushResourceBarriers();
 
-    // shade quads
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
     pRaytracingCommandList->SetComputeRootConstantBufferView(0, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pRaytracingCommandList->SetComputeRootConstantBufferView(1, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pRaytracingCommandList->SetComputeRootDescriptorTable(2, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootDescriptorTable(3, g_SceneSrvs);
     pRaytracingCommandList->SetComputeRootDescriptorTable(4, g_GpuSceneMaterialSrvs[0]);
-    pRaytracingCommandList->SetPipelineState(g_BeamShadeQuadsPSO.GetPipelineStateObject());
+
+    // quad visibility
+    pRaytracingCommandList->SetPipelineState(g_BeamVisPSO.GetPipelineStateObject());
+    pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
+
+    context.InsertUAVBarrier(m_tileShadeQuads);
+    context.FlushResourceBarriers();
+
+    // quad shading
+    pRaytracingCommandList->SetPipelineState(g_BeamShadePSO.GetPipelineStateObject());
     pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
 }
 

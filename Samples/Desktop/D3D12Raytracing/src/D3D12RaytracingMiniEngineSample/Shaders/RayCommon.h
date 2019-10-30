@@ -24,12 +24,20 @@
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
 #define TILE_MAX_TRIS 512
 
-#define QUAD_DIM_X 2
-#define QUAD_DIM_Y 2
-#define QUAD_SIZE (QUAD_DIM_X * QUAD_DIM_Y)
-#define QUADS_PER_TILE_X (TILE_DIM_X / QUAD_DIM_X)
-#define QUADS_PER_TILE_Y (TILE_DIM_Y / QUAD_DIM_Y)
-#define QUADS_PER_TILE (QUADS_PER_TILE_X * QUADS_PER_TILE_Y)
+#define WAVE_SIZE 32
+
+#define QUAD_DIM_LOG2_X 1
+#define QUAD_DIM_LOG2_Y 1
+#define QUAD_DIM_X (1 << QUAD_DIM_LOG2_X)
+#define QUAD_DIM_Y (1 << QUAD_DIM_LOG2_Y)
+#define QUAD_SIZE_LOG2 (QUAD_DIM_LOG2_X + QUAD_DIM_LOG2_Y)
+#define QUAD_SIZE (1 << QUAD_SIZE_LOG2)
+#define QUADS_PER_TILE_LOG2_X (TILE_DIM_LOG2_X - QUAD_DIM_LOG2_X)
+#define QUADS_PER_TILE_LOG2_Y (TILE_DIM_LOG2_Y - QUAD_DIM_LOG2_Y)
+#define QUADS_PER_TILE_LOG2 (QUADS_PER_TILE_LOG2_X + QUADS_PER_TILE_LOG2_Y)
+#define QUADS_PER_TILE_X (1 << QUADS_PER_TILE_LOG2_X)
+#define QUADS_PER_TILE_Y (1 << QUADS_PER_TILE_LOG2_Y)
+#define QUADS_PER_TILE (1 << QUADS_PER_TILE_LOG2)
 
 #define MAX_TRIS_PER_QUAD (QUAD_SIZE * AA_SAMPLES)
 #define MAX_SHADE_QUADS_PER_TILE (MAX_TRIS_PER_QUAD * QUADS_PER_TILE)
@@ -39,6 +47,21 @@
 struct TileTri
 {
     uint id[TILE_MAX_TRIS]; // mesh + primitive IDs
+};
+
+struct ShadeQuad
+{
+    uint id; // mesh + primitive IDs
+    // QUADS_PER_TILE_LOG2_X bits: X quad pos within tile
+    // QUADS_PER_TILE_LOG2_Y bits: Y quad pos within tile
+    // 1 bit: quad done (once per final pixel quad, there will be QUADS_PER_TILE of these per tile)
+    // AA_SAMPLES_LOG2 bits * QUAD_SIZE: sample count - 1
+    uint bits;
+};
+
+struct TileShadeQuads
+{
+    ShadeQuad quads[MAX_SHADE_QUADS_PER_TILE];
 };
 
 struct RayTraceMeshInfo
@@ -102,6 +125,7 @@ SamplerState      g_s0 : register(s0);
 RWTexture2D<float4> g_screenOutput : register(u2);
 RWStructuredBuffer<uint> g_tileTriCounts : register(u3);
 RWStructuredBuffer<TileTri> g_tileTris : register(u4);
+RWStructuredBuffer<TileShadeQuads> g_tileShadeQuads : register(u5);
 
 cbuffer b1 : register(b1)
 {
@@ -112,5 +136,15 @@ cbuffer b3 : register(b3)
 {
     RootConstants rootConstants;
 };
+
+// this swizzling enables the use of QuadRead* lane sharing intrinsics in a compute shader
+void threadIndexToQuadSwizzle(uint threadID, out uint localX, out uint localY)
+{
+    // address bit layout (high to low)
+    // 8x8 tile: yyxxyx
+    // 8x4 tile:  yxxyx
+    localX = (((threadID >> 2                    ) << 1) | ( threadID       & 1)) & ((1 << TILE_DIM_LOG2_X) - 1);
+    localY = (((threadID >> (1 + TILE_DIM_LOG2_X)) << 1) | ((threadID >> 1) & 1)) & ((1 << TILE_DIM_LOG2_Y) - 1);
+}
 
 #endif

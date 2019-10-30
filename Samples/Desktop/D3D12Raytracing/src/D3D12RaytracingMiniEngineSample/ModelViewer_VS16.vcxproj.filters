@@ -13,7 +13,10 @@
     <FxCompile Include="Shaders\BeamsLib.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
-    <FxCompile Include="Shaders\BeamsShadeQuads.hlsl">
+    <FxCompile Include="Shaders\BeamsShade.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\BeamsVis.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>
