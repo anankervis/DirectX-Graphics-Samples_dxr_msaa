@@ -57,7 +57,6 @@ struct ShadeQuad
     // QUADS_PER_TILE_LOG2_X bits: X quad pos within tile
     // QUADS_PER_TILE_LOG2_Y bits: Y quad pos within tile
     // 1 bit: quad done (once per final pixel quad, there will be QUADS_PER_TILE of these per tile)
-    // 1 bit: tile done
     // AA_SAMPLES_LOG2 bits * QUAD_SIZE: sample count - 1
     uint bits;
 };
@@ -129,6 +128,7 @@ RWTexture2D<float4> g_screenOutput : register(u2);
 RWStructuredBuffer<uint> g_tileTriCounts : register(u3);
 RWStructuredBuffer<TileTri> g_tileTris : register(u4);
 RWStructuredBuffer<TileShadeQuads> g_tileShadeQuads : register(u5);
+RWStructuredBuffer<uint> g_tileShadeQuadsCount : register(u6);
 
 cbuffer b1 : register(b1)
 {

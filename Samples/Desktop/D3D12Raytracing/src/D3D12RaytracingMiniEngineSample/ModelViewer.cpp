@@ -236,6 +236,7 @@ private:
     StructuredBuffer m_tileTriCounts;
     StructuredBuffer m_tileTris;
     StructuredBuffer m_tileShadeQuads;
+    StructuredBuffer m_tileShadeQuadsCount;
 
     Vector3 m_SunDirection;
 
@@ -434,6 +435,9 @@ void DxrMsaaDemo::InitializeViews()
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
         Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuads.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuadsCount.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     {
@@ -718,7 +722,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         g_BeamPostRootSig.Reset(5, 1);
         g_BeamPostRootSig[0].InitAsConstantBuffer(0);
         g_BeamPostRootSig[1].InitAsConstantBuffer(1);
-        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 4);
+        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 5);
         g_BeamPostRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
         g_BeamPostRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 100, UINT_MAX);
         g_BeamPostRootSig.InitStaticSampler(0, DefaultSamplerDesc);
@@ -1027,6 +1031,7 @@ void DxrMsaaDemo::Startup()
         m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
         m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
         m_tileShadeQuads.Create(L"m_tileShadeQuads", tileCount, sizeof(TileShadeQuads), nullptr);
+        m_tileShadeQuadsCount.Create(L"m_tileShadeQuadsCount", tileCount, sizeof(uint32_t), nullptr);
     }
 
     // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
@@ -1330,6 +1335,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.TransitionResource(m_tileTriCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileTris, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuads, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileShadeQuadsCount, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.FlushResourceBarriers();
 
     context.ClearUAV(m_tileTriCounts);
@@ -1370,6 +1376,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
 
     context.InsertUAVBarrier(m_tileShadeQuads);
+    context.InsertUAVBarrier(m_tileShadeQuadsCount);
     context.FlushResourceBarriers();
 
     // quad shading

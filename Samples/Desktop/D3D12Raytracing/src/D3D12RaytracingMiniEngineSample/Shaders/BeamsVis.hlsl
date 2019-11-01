@@ -52,10 +52,13 @@ void EmitQuad(
     shadeQuad.bits = quadIndex;
     if (quadDone)
         shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 0);
-    shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 0);
-    shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 1);
-    shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 2);
-    shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 3);
+    if (id != BAD_TRI_ID)
+    {
+        shadeQuad.bits |= (matchCount00 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 0);
+        shadeQuad.bits |= (matchCount10 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 1);
+        shadeQuad.bits |= (matchCount01 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 2);
+        shadeQuad.bits |= (matchCount11 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 3);
+    }
 
     if (quadLocalIndex == 0)
     {
@@ -72,7 +75,7 @@ void EmitQuad(
 [RootSignature(
     "CBV(b0),"
     "CBV(b1),"
-    "DescriptorTable(UAV(u2, numDescriptors = 4)),"
+    "DescriptorTable(UAV(u2, numDescriptors = 5)),"
     "DescriptorTable(SRV(t1, numDescriptors = 3)),"
     "DescriptorTable(SRV(t100, numDescriptors = unbounded)),"
     "StaticSampler(s0, maxAnisotropy = 8),"
@@ -102,11 +105,13 @@ void BeamsQuadVis(
     if (tileTriCount <= 0)
     {
         // no triangles overlap this tile
+        g_tileShadeQuadsCount[tileIndex] = 0;
         return;
     }
     else if (tileTriCount > TILE_MAX_TRIS)
     {
         // tile tri list overflowed
+        g_tileShadeQuadsCount[tileIndex] = ~uint(0);
         return;
     }
 
@@ -213,10 +218,5 @@ void BeamsQuadVis(
     }
     GroupMemoryBarrierWithGroupSync();
 
-    if (tileQuadCount <= MAX_SHADE_QUADS_PER_TILE)
-    {
-        // mark the last tri-quad pair as "tile done"
-        uint tileDoneBit = 1 << (QUADS_PER_TILE_LOG2 + 1);
-        InterlockedOr(g_tileShadeQuads[tileIndex].quads[tileQuadCount - 1].bits, tileDoneBit);
-    }
+    g_tileShadeQuadsCount[tileIndex] = tileQuadCount;
 }
