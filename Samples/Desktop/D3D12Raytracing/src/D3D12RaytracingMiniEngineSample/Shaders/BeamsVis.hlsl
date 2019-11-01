@@ -39,6 +39,7 @@ void EmitQuad(
     uint matchCount10 = qr_uint[threadID00 + 1];
     uint matchCount01 = qr_uint[threadID00 + 2];
     uint matchCount11 = qr_uint[threadID00 + 3];
+    GroupMemoryBarrierWithGroupSync();
 #else
     uint matchCount00 = QuadReadLaneAt(localID, 0);
     uint matchCount10 = QuadReadLaneAt(localID, 1);
@@ -50,11 +51,11 @@ void EmitQuad(
     shadeQuad.id = id;
     shadeQuad.bits = quadIndex;
     if (quadDone)
-        shadeQuad.bits |= 1 << QUADS_PER_TILE_LOG2;
-    shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 0);
-    shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 1);
-    shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 2);
-    shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 3);
+        shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 0);
+    shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 0);
+    shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 1);
+    shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 2);
+    shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * 3);
 
     if (quadLocalIndex == 0)
     {
@@ -88,7 +89,7 @@ void BeamsQuadVis(
     uint threadID = groupThreadID.x;
     uint quadLocalIndex = threadID & (QUAD_SIZE - 1);
     uint quadIndex = threadID / QUAD_SIZE;
-    uint quadLaneMask = (QUAD_SIZE - 1) << (quadIndex * QUAD_SIZE_LOG2);
+    uint quadLaneMask = (QUAD_SIZE - 1) << (quadIndex * QUAD_SIZE);
     uint localX;
     uint localY;
     threadIndexToQuadSwizzle(threadID, localX, localY);
@@ -144,16 +145,10 @@ void BeamsQuadVis(
         }
     }
 
-    // group hits on the same triangle together, and misses (BAD_TRI_ID) at the end
-    uint sortKeys[AA_SAMPLES];
-    enum { sortKeySampleMask = (1 << AA_SAMPLES_LOG2) - 1 };
-    // let's assume the max mesh count is 2^(16 - AA_SAMPLES_LOG2) - 1
-    // so we can stuff the sample ID and mesh+prim ID into the same 32-bit uint
-    {for (int i = 0; i < AA_SAMPLES; i++)
-    {
-        sortKeys[i] = (nearestID[i] << AA_SAMPLES_LOG2) | i;
-    }}
-    sortBitonic(sortKeys);
+    // Beware packing bits into the sort key and/or sign-extending it on unpack like HVVR does...
+    // HLSL likes to silently convert uint to int (for example, the min intrinsic).
+    sortBitonic(nearestID);
+// TODO: move sort result into groupshared for indexing code gen?
 
     if (threadID == 0)
         tileQuadCount = 0;
@@ -169,7 +164,7 @@ void BeamsQuadVis(
 
         uint localID = BAD_TRI_ID;
         if (!localDone)
-            localID = int(sortKeys[localS]) >> AA_SAMPLES_LOG2; // shift with sign fill
+            localID = nearestID[localS];
 
 #if QUAD_READ_GROUPSHARED_FALLBACK
         // groupshared fallback
@@ -180,6 +175,7 @@ void BeamsQuadVis(
         uint id10 = qr_uint[threadID00 + 1];
         uint id01 = qr_uint[threadID00 + 2];
         uint id11 = qr_uint[threadID00 + 3];
+        GroupMemoryBarrierWithGroupSync();
 #else
         uint id00 = QuadReadLaneAt(localID, 0);
         uint id10 = QuadReadLaneAt(localID, 1);
@@ -214,5 +210,13 @@ void BeamsQuadVis(
             localMatchCount++;
             localS++;
         }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (tileQuadCount <= MAX_SHADE_QUADS_PER_TILE)
+    {
+        // mark the last tri-quad pair as "tile done"
+        uint tileDoneBit = 1 << (QUADS_PER_TILE_LOG2 + 1);
+        InterlockedOr(g_tileShadeQuads[tileIndex].quads[tileQuadCount - 1].bits, tileDoneBit);
     }
 }

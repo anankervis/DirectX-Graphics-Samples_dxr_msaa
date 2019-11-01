@@ -42,7 +42,9 @@
 #define MAX_TRIS_PER_QUAD (QUAD_SIZE * AA_SAMPLES)
 #define MAX_SHADE_QUADS_PER_TILE (MAX_TRIS_PER_QUAD * QUADS_PER_TILE)
 
-#define BAD_TRI_ID (~uint(0))
+// To be safe, keep this in the +range of a signed int... HLSL silently converts
+// uint to int in a lot of places (for example, the min intrinsic).
+#define BAD_TRI_ID (uint(0x7fffffff))
 
 struct TileTri
 {
@@ -55,6 +57,7 @@ struct ShadeQuad
     // QUADS_PER_TILE_LOG2_X bits: X quad pos within tile
     // QUADS_PER_TILE_LOG2_Y bits: Y quad pos within tile
     // 1 bit: quad done (once per final pixel quad, there will be QUADS_PER_TILE of these per tile)
+    // 1 bit: tile done
     // AA_SAMPLES_LOG2 bits * QUAD_SIZE: sample count - 1
     uint bits;
 };

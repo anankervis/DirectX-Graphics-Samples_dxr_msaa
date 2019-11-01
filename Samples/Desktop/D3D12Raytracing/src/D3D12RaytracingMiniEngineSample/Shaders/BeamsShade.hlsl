@@ -32,6 +32,7 @@ struct ShadePixel
 groupshared float3 tileFramebuffer[TILE_SIZE];
 
 groupshared uint tileQuadCount;
+groupshared uint tileDoneSlot;
 
 #if QUAD_READ_GROUPSHARED_FALLBACK
 groupshared float2 qr_float2[TILE_SIZE];
@@ -52,6 +53,7 @@ float3 ShadeQuadThread(
     float2 uv00 = qr_float2[threadID00 + 0];
     float2 uv10 = qr_float2[threadID00 + 1];
     float2 uv01 = qr_float2[threadID00 + 2];
+    GroupMemoryBarrierWithGroupSync();
 #else
     // Doesn't work in compute shaders (it's spec'd to), unless you disable validation in the HLSL compiler
     // and enable D3D12ExperimentalShaderModels prior to device creation.
@@ -143,7 +145,10 @@ void BeamsQuadShade(
 
     tileFramebuffer[threadID] = tileFill;
     if (threadID == 0)
+    {
         tileQuadCount = 0;
+        tileDoneSlot = ~uint(0);
+    }
     GroupMemoryBarrierWithGroupSync();
 
     if (tileOK)
@@ -156,9 +161,16 @@ void BeamsQuadShade(
                 break;
             ShadeQuad shadeQuad = g_tileShadeQuads[tileIndex].quads[inputSlot];
 
+            bool tileDone = (shadeQuad.bits & (1 << (QUADS_PER_TILE_LOG2 + 1))) != 0;
+            if (tileDone)
+                tileDoneSlot = inputSlot;
+            GroupMemoryBarrierWithGroupSync();
+            if (tileDoneSlot < inputSlot)
+                break;
+
             uint quadIndex = shadeQuad.bits & (QUADS_PER_TILE - 1);
-            bool quadDone = (shadeQuad.bits & (1 << QUADS_PER_TILE_LOG2)) != 0;
-            uint sampleCount = (shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * quadLocalIndex)) & (AA_SAMPLES - 1);
+            bool quadDone = (shadeQuad.bits & (1 << (QUADS_PER_TILE_LOG2 + 0))) != 0;
+            uint sampleCount = (shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + 2 + AA_SAMPLES_LOG2 * quadLocalIndex)) & (AA_SAMPLES - 1);
 
             uint tileLocalIndex = quadIndex * QUAD_SIZE + quadLocalIndex;
 
@@ -179,20 +191,20 @@ void BeamsQuadShade(
 
             uint id = shadeQuad.id;
             if (id == BAD_TRI_ID)
-                break; // end of the list, some samples didn't hit anything
+            {
+                // beam traversal found potential triangles for this tile, but none survived past quad visibility test
+                continue;
+            }
 
             uint meshID = id >> 16;
             uint primID = id & 0xffff;
-
             Triangle tri = triFetch(meshID, primID);
+
             float3 uvw = triIntersectNoFail(rayOriginShade, rayDirShade, tri).xyz;
 
             tileFramebuffer[tileLocalIndex] += sampleCount * ShadeQuadThread(
                 threadID,
                 rayDirShade, meshID, primID, uvw);
-
-            //if (quadDone)
-            //    break; // all samples have been shaded
         }
         GroupMemoryBarrierWithGroupSync();
     }
