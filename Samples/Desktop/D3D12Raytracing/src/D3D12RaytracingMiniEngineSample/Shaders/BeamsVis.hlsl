@@ -54,10 +54,10 @@ void EmitQuad(
         shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 0);
     if (id != BAD_TRI_ID)
     {
-        shadeQuad.bits |= (matchCount00 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 0);
-        shadeQuad.bits |= (matchCount10 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 1);
-        shadeQuad.bits |= (matchCount01 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 2);
-        shadeQuad.bits |= (matchCount11 - 1) << (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * 3);
+        shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 0);
+        shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 1);
+        shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 2);
+        shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 3);
     }
 
     if (quadLocalIndex == 0)

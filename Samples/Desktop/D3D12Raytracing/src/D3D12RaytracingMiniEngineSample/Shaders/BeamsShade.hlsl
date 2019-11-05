@@ -33,7 +33,8 @@ struct ShadePixel
 
 #if PACKED_TILE_FB
 # define TILE_FRAMEBUFFER_BITS 10
-# define TILE_FRAMEBUFFER_SCALE ((1 << TILE_FRAMEBUFFER_BITS) - 1)
+# define TILE_FRAMEBUFFER_MASK ((1 << TILE_FRAMEBUFFER_BITS) - 1)
+# define TILE_FRAMEBUFFER_SCALE ((1 << (TILE_FRAMEBUFFER_BITS - AA_SAMPLES_LOG2)) - 1)
 groupshared uint tileFramebufferPacked[TILE_SIZE];
 
 uint tileFbPack(float3 c)
@@ -47,9 +48,9 @@ uint tileFbPack(float3 c)
 float3 tileFbUnpack(uint c)
 {
     return float3(
-        float((c >> (TILE_FRAMEBUFFER_BITS * 0)) & TILE_FRAMEBUFFER_SCALE),
-        float((c >> (TILE_FRAMEBUFFER_BITS * 1)) & TILE_FRAMEBUFFER_SCALE),
-        float((c >> (TILE_FRAMEBUFFER_BITS * 2)) & TILE_FRAMEBUFFER_SCALE)) / TILE_FRAMEBUFFER_SCALE;
+        float((c >> (TILE_FRAMEBUFFER_BITS * 0)) & TILE_FRAMEBUFFER_MASK),
+        float((c >> (TILE_FRAMEBUFFER_BITS * 1)) & TILE_FRAMEBUFFER_MASK),
+        float((c >> (TILE_FRAMEBUFFER_BITS * 2)) & TILE_FRAMEBUFFER_MASK)) / (TILE_FRAMEBUFFER_SCALE * AA_SAMPLES);
 }
 #else
 groupshared float3 tileFramebuffer[TILE_SIZE];
@@ -141,97 +142,100 @@ void BeamsQuadShade(
     uint pixelDimX = dynamicConstants.tilesX * TILE_DIM_X;
     uint pixelDimY = dynamicConstants.tilesY * TILE_DIM_Y;
 
-    float3 tileFill = float3(0, 0, 0);
-    bool tileOK = true;
+    uint2 outputPos = uint2(
+        tileX * TILE_DIM_X + threadID % TILE_DIM_X,
+        tileY * TILE_DIM_Y + threadID / TILE_DIM_X);
+
     uint quadCount = g_tileShadeQuadsCount[tileIndex];
     if (quadCount == 0)
     {
         // no triangles overlap this tile
-        tileFill = float3(0, 0, 1);
-        tileOK = false;
+        g_screenOutput[outputPos] = float4(0, 0, 1, 1);
+        return;
     }
     else if (quadCount > MAX_SHADE_QUADS_PER_TILE)
     {
         // tile tri list overflowed
-        tileFill = float3(1, 0, 0);
-        tileOK = false;
+        g_screenOutput[outputPos] = float4(1, 0, 0, 1);
+        return;
     }
 
 #if PACKED_TILE_FB
-    tileFramebufferPacked[threadID] = tileFbPack(tileFill);
+    tileFramebufferPacked[threadID] = tileFbPack(float3(0, 0, 0));
 #else
     tileFramebuffer[threadID] = tileFill;
 #endif
     GroupMemoryBarrierWithGroupSync();
 
-    if (tileOK)
+    uint inputSlot = threadID / QUAD_SIZE;
+    while (inputSlot < quadCount)
     {
-        uint inputSlot = threadID / QUAD_SIZE;
-        while (inputSlot < quadCount)
+        ShadeQuad shadeQuad = g_tileShadeQuads[tileIndex].quads[inputSlot];
+        inputSlot += QUADS_PER_TILE;
+
+        uint quadIndex = shadeQuad.bits & (QUADS_PER_TILE - 1);
+        bool quadDone = (shadeQuad.bits & (1 << (QUADS_PER_TILE_LOG2 + 0))) != 0;
+        uint sampleCount = shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * quadLocalIndex);
+        sampleCount &= (1 << (AA_SAMPLES_LOG2 + 1)) - 1;
+
+        uint fauxThreadID = quadIndex * QUAD_SIZE + quadLocalIndex;
+
+        uint localX;
+        uint localY;
+        threadIndexToQuadSwizzle(fauxThreadID, localX, localY);
+        uint tileFbIndex = localY * TILE_DIM_X + localX;
+        uint pixelX = tileX * TILE_DIM_X + localX;
+        uint pixelY = tileY * TILE_DIM_Y + localY;
+
+        // TODO: centroid
+        float3 rayOriginShade;
+        float3 rayDirShade;
+        GenerateCameraRay(
+            uint2(pixelDimX, pixelDimY),
+            float2(pixelX, pixelY),
+            rayOriginShade, rayDirShade);
+
+        uint id = shadeQuad.id;
+        if (id == BAD_TRI_ID)
         {
-            ShadeQuad shadeQuad = g_tileShadeQuads[tileIndex].quads[inputSlot];
-            inputSlot += QUADS_PER_TILE;
+            // beam traversal found potential triangles for this tile, but none survived past quad visibility test
+            continue;
+        }
 
-            uint quadIndex = shadeQuad.bits & (QUADS_PER_TILE - 1);
-            bool quadDone = (shadeQuad.bits & (1 << (QUADS_PER_TILE_LOG2 + 0))) != 0;
-            uint sampleCount = 1 + ((shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + 1 + AA_SAMPLES_LOG2 * quadLocalIndex)) & (AA_SAMPLES - 1));
+        uint meshID = id >> 16;
+        uint primID = id & 0xffff;
+        Triangle tri = triFetch(meshID, primID);
 
-            uint fauxThreadID = quadIndex * QUAD_SIZE + quadLocalIndex;
-
-            uint localX;
-            uint localY;
-            threadIndexToQuadSwizzle(fauxThreadID, localX, localY);
-            uint tileFbIndex = localY * TILE_DIM_X + localX;
-            uint pixelX = tileX * TILE_DIM_X + localX;
-            uint pixelY = tileY * TILE_DIM_Y + localY;
-
-            // TODO: centroid
-            float3 rayOriginShade;
-            float3 rayDirShade;
-            GenerateCameraRay(
-                uint2(pixelDimX, pixelDimY),
-                float2(pixelX, pixelY),
-                rayOriginShade, rayDirShade);
-
-            uint id = shadeQuad.id;
-            if (id == BAD_TRI_ID)
-            {
-                // beam traversal found potential triangles for this tile, but none survived past quad visibility test
-                continue;
-            }
-
-            uint meshID = id >> 16;
-            uint primID = id & 0xffff;
-            Triangle tri = triFetch(meshID, primID);
-
-            float3 uvw = triIntersectNoFail(rayOriginShade, rayDirShade, tri).xyz;
+        float3 uvw = triIntersectNoFail(rayOriginShade, rayDirShade, tri).xyz;
 
 #if PACKED_TILE_FB
-            float3 shadeColor = ShadeQuadThread(
-                threadID,
-                rayDirShade, meshID, primID, uvw);
+        float3 shadeColor = ShadeQuadThread(
+            threadID,
+            rayDirShade, meshID, primID, uvw);
 
-            shadeColor = clamp(shadeColor, 0.0f, 1.0f);
-            shadeColor *= float(sampleCount) / AA_SAMPLES;
+        shadeColor = clamp(shadeColor, 0.0f, 1.0f);
 
-            uint packedColor = tileFbPack(shadeColor);
-            InterlockedAdd(tileFramebufferPacked[tileFbIndex], packedColor);
+        uint packedColor = tileFbPack(shadeColor);
+        packedColor *= sampleCount;
+
+//packedColor = sampleCount;
+        InterlockedAdd(tileFramebufferPacked[tileFbIndex], packedColor);
 #else
-            tileFramebuffer[tileFbIndex] += sampleCount * ShadeQuadThread(
-                threadID,
-                rayDirShade, meshID, primID, uvw);
+        tileFramebuffer[tileFbIndex] += sampleCount * ShadeQuadThread(
+            threadID,
+            rayDirShade, meshID, primID, uvw);
 #endif
-        }
-        GroupMemoryBarrierWithGroupSync();
     }
-
-    uint2 outputPos = uint2(
-        tileX * TILE_DIM_X + threadID % TILE_DIM_X,
-        tileY * TILE_DIM_Y + threadID / TILE_DIM_X);
+    GroupMemoryBarrierWithGroupSync();
 
 #if PACKED_TILE_FB
     float3 unpackedColor = tileFbUnpack(tileFramebufferPacked[threadID]);
     g_screenOutput[outputPos] = float4(unpackedColor, 1);
+/*g_screenOutput[outputPos] = float4(
+    tileFramebufferPacked[threadID] != AA_SAMPLES ? 1.0f : 0.0,
+    tileFramebufferPacked[threadID] >  AA_SAMPLES ? 1.0f : 0.0,
+    tileFramebufferPacked[threadID] <  AA_SAMPLES ? 1.0f : 0.0,
+    1);*/
 #else
     g_screenOutput[outputPos] = float4(tileFramebuffer[threadID] / AA_SAMPLES, 1);
 #endif
