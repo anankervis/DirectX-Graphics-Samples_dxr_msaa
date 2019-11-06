@@ -54,6 +54,11 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 
     float2 uvDx = triDX.uv - tri.uv;
     float2 uvDy = triDY.uv - tri.uv;
+    // Our derivatives are calculated with a spacing of 1 pixel, adjust for effective resolution boost of SSAA.
+    // This way we get the texture sharpness you'd expect from running at 4x, 8x, etc. resolution and filtering down.
+    float ssaaMipScale = 1.0f / sqrt(AA_SAMPLES);
+    uvDx *= ssaaMipScale;
+    uvDy *= ssaaMipScale;
 
     float3 diffuseColor = g_localTexture.SampleGrad(g_s0, tri.uv, uvDx, uvDy).rgb;
 
