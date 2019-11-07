@@ -218,7 +218,6 @@ void BeamsQuadShade(
         uint packedColor = tileFbPack(shadeColor);
         packedColor *= sampleCount;
 
-//packedColor = sampleCount;
         InterlockedAdd(tileFramebufferPacked[tileFbIndex], packedColor);
 #else
         tileFramebuffer[tileFbIndex] += sampleCount * ShadeQuadThread(
@@ -231,11 +230,6 @@ void BeamsQuadShade(
 #if PACKED_TILE_FB
     float3 unpackedColor = tileFbUnpack(tileFramebufferPacked[threadID]);
     g_screenOutput[outputPos] = float4(unpackedColor, 1);
-/*g_screenOutput[outputPos] = float4(
-    tileFramebufferPacked[threadID] != AA_SAMPLES ? 1.0f : 0.0,
-    tileFramebufferPacked[threadID] >  AA_SAMPLES ? 1.0f : 0.0,
-    tileFramebufferPacked[threadID] <  AA_SAMPLES ? 1.0f : 0.0,
-    1);*/
 #else
     g_screenOutput[outputPos] = float4(tileFramebuffer[threadID] / AA_SAMPLES, 1);
 #endif

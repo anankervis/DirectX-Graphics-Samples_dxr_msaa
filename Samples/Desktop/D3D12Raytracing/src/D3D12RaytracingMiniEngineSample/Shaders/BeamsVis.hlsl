@@ -8,6 +8,8 @@
 
 #pragma warning (disable: 3078) // this doesn't seem to work with the new HLSL compiler...
 
+#define DEBUG_SSAA 0 // enable to emit one shade quad per sample, per pixel, for debugging
+
 struct ShadePixel
 {
     uint id; // mesh + primitive IDs
@@ -92,7 +94,7 @@ void BeamsQuadVis(
     uint threadID = groupThreadID.x;
     uint quadLocalIndex = threadID & (QUAD_SIZE - 1);
     uint quadIndex = threadID / QUAD_SIZE;
-    uint quadLaneMask = (QUAD_SIZE - 1) << (quadIndex * QUAD_SIZE);
+    uint quadLaneMask = uint((1 << QUAD_SIZE) - 1) << (quadIndex * QUAD_SIZE);
     uint localX;
     uint localY;
     threadIndexToQuadSwizzle(threadID, localX, localY);
@@ -149,6 +151,29 @@ void BeamsQuadVis(
             }
         }
     }
+
+#if DEBUG_SSAA
+    {
+        uint localOutputSlot = 0;
+        for (uint s = 0; s < AA_SAMPLES; s++)
+        {
+            uint id = nearestID[s];
+            if (id == BAD_TRI_ID)
+                continue;
+
+            ShadeQuad shadeQuad;
+            shadeQuad.id = id;
+            shadeQuad.bits = quadIndex;
+            shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * quadLocalIndex);
+
+            g_tileShadeQuads[tileIndex].quads[threadID * AA_SAMPLES + localOutputSlot] = shadeQuad;
+            localOutputSlot++;
+        }
+    }
+    if (threadID == 0)
+        g_tileShadeQuadsCount[tileIndex] = MAX_SHADE_QUADS_PER_TILE;
+    return;
+#endif
 
     // Beware packing bits into the sort key and/or sign-extending it on unpack like HVVR does...
     // HLSL likes to silently convert uint to int (for example, the min intrinsic).
