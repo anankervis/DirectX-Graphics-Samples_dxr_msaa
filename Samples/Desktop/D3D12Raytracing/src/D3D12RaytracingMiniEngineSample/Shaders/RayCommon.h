@@ -16,13 +16,17 @@
 #define AA_SAMPLES (1 << AA_SAMPLES_LOG2)
 #define AA_SAMPLE_MASK ((uint(1) << AA_SAMPLES) - 1)
 
+#define TRIS_PER_AABB 2
+#define PRIM_ID_BITS 16
+#define PRIM_ID_MASK ((1 << PRIM_ID_BITS) - 1)
+
 // 8x4 tiles
 #define TILE_DIM_LOG2_X 3
 #define TILE_DIM_LOG2_Y 2
 #define TILE_DIM_X (1 << TILE_DIM_LOG2_X)
 #define TILE_DIM_Y (1 << TILE_DIM_LOG2_Y)
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
-#define TILE_MAX_TRIS 512
+#define TILE_MAX_LEAVES 256
 
 #define WAVE_SIZE 32
 
@@ -48,7 +52,7 @@
 
 struct TileTri
 {
-    uint id[TILE_MAX_TRIS]; // mesh + primitive IDs
+    uint id[TILE_MAX_LEAVES]; // mesh + primitive IDs
 };
 
 struct ShadeQuad
@@ -68,6 +72,7 @@ struct TileShadeQuads
 
 struct RayTraceMeshInfo
 {
+    uint triCount;
     uint indexOffset;
     uint attrOffsetTexcoord0;
     uint attrOffsetNormal;
@@ -128,8 +133,8 @@ Texture2D<float4> g_localNormal : register(t11);
 SamplerState      g_s0 : register(s0);
 
 RWTexture2D<float4> g_screenOutput : register(u2);
-RWStructuredBuffer<uint> g_tileTriCounts : register(u3);
-RWStructuredBuffer<TileTri> g_tileTris : register(u4);
+RWStructuredBuffer<uint> g_tileLeafCounts : register(u3);
+RWStructuredBuffer<TileTri> g_tileLeaves : register(u4);
 RWStructuredBuffer<TileShadeQuads> g_tileShadeQuads : register(u5);
 RWStructuredBuffer<uint> g_tileShadeQuadsCount : register(u6);
 

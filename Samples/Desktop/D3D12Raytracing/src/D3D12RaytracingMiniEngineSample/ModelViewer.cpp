@@ -241,8 +241,8 @@ private:
 
     uint32_t m_tilesX;
     uint32_t m_tilesY;
-    StructuredBuffer m_tileTriCounts;
-    StructuredBuffer m_tileTris;
+    StructuredBuffer m_tileLeafCounts;
+    StructuredBuffer m_tileLeaves;
     StructuredBuffer m_tileShadeQuads;
     StructuredBuffer m_tileShadeQuadsCount;
 
@@ -405,6 +405,7 @@ void DxrMsaaDemo::InitializeSceneInfo()
     std::vector<RayTraceMeshInfo>   meshInfoData(m_Model.m_Header.meshCount);
     for (UINT i=0; i < m_Model.m_Header.meshCount; ++i)
     {
+        meshInfoData[i].triCount = m_Model.m_pMesh[i].indexCount / 3;
         meshInfoData[i].indexOffset = m_Model.m_pMesh[i].indexDataByteOffset;
         meshInfoData[i].attrOffsetTexcoord0 = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_texcoord0].offset;
         meshInfoData[i].attrOffsetNormal = m_Model.m_pMesh[i].vertexDataByteOffset + m_Model.m_pMesh[i].attrib[Model::attrib_normal].offset;
@@ -436,10 +437,10 @@ void DxrMsaaDemo::InitializeViews()
 
         UINT unused;
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
-        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileTriCounts.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileLeafCounts.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
-        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileTris.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileLeaves.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
         Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuads.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -774,31 +775,37 @@ void DxrMsaaDemo::createAABBs()
         const uint8_t *vertexData = (const uint8_t*)(m_Model.m_pVertexData
             + mesh.vertexDataByteOffset + mesh.attrib[Model::attrib_position].offset);
 
-        for (uint32_t t = 0; t < triCount; t++)
+        for (uint32_t a = 0; a < (triCount + TRIS_PER_AABB - 1) / TRIS_PER_AABB; a++)
         {
-            uint32_t i[3] =
-            {
-                indexData[t * 3 + 0],
-                indexData[t * 3 + 1],
-                indexData[t * 3 + 2],
-            };
-
-            const float *v[3] =
-            {
-                (const float*)(vertexData + mesh.vertexStride * i[0]),
-                (const float*)(vertexData + mesh.vertexStride * i[1]),
-                (const float*)(vertexData + mesh.vertexStride * i[2]),
-            };
-
             D3D12_RAYTRACING_AABB aabb =
             {
-                min(v[0][0], min(v[1][0], v[2][0])),
-                min(v[0][1], min(v[1][1], v[2][1])),
-                min(v[0][2], min(v[1][2], v[2][2])),
-                max(v[0][0], max(v[1][0], v[2][0])),
-                max(v[0][1], max(v[1][1], v[2][1])),
-                max(v[0][2], max(v[1][2], v[2][2])),
+                 FLT_MAX,  FLT_MAX,  FLT_MAX,
+                -FLT_MAX, -FLT_MAX, -FLT_MAX,
             };
+
+            for (uint32_t t = a * TRIS_PER_AABB; t < (a + 1) * TRIS_PER_AABB; t++)
+            {
+                uint32_t i[3] =
+                {
+                    indexData[t * 3 + 0],
+                    indexData[t * 3 + 1],
+                    indexData[t * 3 + 2],
+                };
+
+                const float *v[3] =
+                {
+                    (const float*)(vertexData + mesh.vertexStride * i[0]),
+                    (const float*)(vertexData + mesh.vertexStride * i[1]),
+                    (const float*)(vertexData + mesh.vertexStride * i[2]),
+                };
+
+                aabb.MinX = min(aabb.MinX, min(v[0][0], min(v[1][0], v[2][0])));
+                aabb.MinY = min(aabb.MinY, min(v[0][1], min(v[1][1], v[2][1])));
+                aabb.MinZ = min(aabb.MinZ, min(v[0][2], min(v[1][2], v[2][2])));
+                aabb.MaxX = max(aabb.MaxX, max(v[0][0], max(v[1][0], v[2][0])));
+                aabb.MaxY = max(aabb.MaxY, max(v[0][1], max(v[1][1], v[2][1])));
+                aabb.MaxZ = max(aabb.MaxZ, max(v[0][2], max(v[1][2], v[2][2])));
+            }
 
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
             float camPosX = m_Camera.GetPosition().GetX();
@@ -877,7 +884,7 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
         {
             uint32_t stride = m_ModelAABBs.GetElementSize();
             uint32_t triCount = mesh.indexCount / 3;
-            uint32_t aabbCount = triCount;
+            uint32_t aabbCount = (triCount + TRIS_PER_AABB - 1) / TRIS_PER_AABB;
 
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
             geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION;
@@ -1036,8 +1043,8 @@ void DxrMsaaDemo::Startup()
         m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_DIM_Y;
         uint32_t tileCount = m_tilesX * m_tilesY;
 
-        m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
-        m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
+        m_tileLeafCounts.Create(L"m_tileLeafCounts", tileCount, sizeof(uint), nullptr);
+        m_tileLeaves.Create(L"m_tileLeaves", tileCount, sizeof(TileTri), nullptr);
         m_tileShadeQuads.Create(L"m_tileShadeQuads", tileCount, sizeof(TileShadeQuads), nullptr);
         m_tileShadeQuadsCount.Create(L"m_tileShadeQuadsCount", tileCount, sizeof(uint32_t), nullptr);
     }
@@ -1352,13 +1359,13 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(m_tileTriCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(m_tileTris, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileLeafCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileLeaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuads, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuadsCount, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.FlushResourceBarriers();
 
-    context.ClearUAV(m_tileTriCounts);
+    context.ClearUAV(m_tileLeafCounts);
 
     ID3D12GraphicsCommandList* pCommandList = context.GetCommandList();
     CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
@@ -1383,8 +1390,8 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     }
 
     // done with beam traversal, switch to post processing
-    context.InsertUAVBarrier(m_tileTriCounts);
-    context.InsertUAVBarrier(m_tileTris);
+    context.InsertUAVBarrier(m_tileLeafCounts);
+    context.InsertUAVBarrier(m_tileLeaves);
     context.FlushResourceBarriers();
 
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());

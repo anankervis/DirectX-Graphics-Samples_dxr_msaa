@@ -149,13 +149,13 @@ void BeamsQuadShade(
     uint quadCount = g_tileShadeQuadsCount[tileIndex];
     if (quadCount == 0)
     {
-        // no triangles overlap this tile
+        // no shade quads generated for this tile
         g_screenOutput[outputPos] = float4(0, 0, 1, 1);
         return;
     }
     else if (quadCount > MAX_SHADE_QUADS_PER_TILE)
     {
-        // tile tri list overflowed
+        // shade quad list overflowed
         g_screenOutput[outputPos] = float4(1, 0, 0, 1);
         return;
     }
@@ -196,14 +196,15 @@ void BeamsQuadShade(
             rayOriginShade, rayDirShade);
 
         uint id = shadeQuad.id;
+// TODO: remove this, now that we have a shade quad count
         if (id == BAD_TRI_ID)
         {
             // beam traversal found potential triangles for this tile, but none survived past quad visibility test
             continue;
         }
 
-        uint meshID = id >> 16;
-        uint primID = id & 0xffff;
+        uint meshID = id >> PRIM_ID_BITS;
+        uint primID = id & PRIM_ID_MASK;
         Triangle tri = triFetch(meshID, primID);
 
         float3 uvw = triIntersectNoFail(rayOriginShade, rayDirShade, tri).xyz;

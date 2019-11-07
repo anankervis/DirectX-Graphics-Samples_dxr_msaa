@@ -3,7 +3,7 @@
 #include "RayCommon.h"
 #include "RayGen.h"
 
-// Record the triangle and move on. We'll compute coverage later.
+// Record the leaf node and move on. We'll compute coverage later.
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {
@@ -11,15 +11,15 @@ void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
     uint tileY = DispatchRaysIndex().y;
     uint tileIndex = tileY * DispatchRaysDimensions().x + tileX;
 
-    uint triSlot;
-    InterlockedAdd(g_tileTriCounts[tileIndex], 1, triSlot);
+    uint leafSlot;
+    InterlockedAdd(g_tileLeafCounts[tileIndex], 1, leafSlot);
 
-    if (triSlot >= TILE_MAX_TRIS)
+    if (leafSlot >= TILE_MAX_LEAVES)
         return;
 
-    uint id = (rootConstants.meshID << 16) | PrimitiveIndex();
+    uint id = (rootConstants.meshID << PRIM_ID_BITS) | PrimitiveIndex();
 
-    g_tileTris[tileIndex].id[triSlot] = id;
+    g_tileLeaves[tileIndex].id[leafSlot] = id;
 }
 
 [shader("intersection")]

@@ -103,16 +103,16 @@ void BeamsQuadVis(
     uint pixelDimX = dynamicConstants.tilesX * TILE_DIM_X;
     uint pixelDimY = dynamicConstants.tilesY * TILE_DIM_Y;
 
-    uint tileTriCount = g_tileTriCounts[tileIndex];
-    if (tileTriCount <= 0)
+    uint tileLeafCount = g_tileLeafCounts[tileIndex];
+    if (tileLeafCount <= 0)
     {
-        // no triangles overlap this tile
+        // no leaves overlap this tile
         g_tileShadeQuadsCount[tileIndex] = 0;
         return;
     }
-    else if (tileTriCount > TILE_MAX_TRIS)
+    else if (tileLeafCount > TILE_MAX_LEAVES)
     {
-        // tile tri list overflowed
+        // tile leaf list overflowed
         g_tileShadeQuadsCount[tileIndex] = ~uint(0);
         return;
     }
@@ -124,30 +124,38 @@ void BeamsQuadVis(
         nearestT[s] = FLT_MAX;
         nearestID[s] = BAD_TRI_ID;
     }}
-    for (uint tileTriIndex = 0; tileTriIndex < tileTriCount; tileTriIndex++)
+    for (uint tileLeafIndex = 0; tileLeafIndex < tileLeafCount; tileLeafIndex++)
     {
-        uint id = g_tileTris[tileIndex].id[tileTriIndex];
-        uint meshID = id >> 16;
-        uint primID = id & 0xffff;
+        uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
+        uint meshID = aabbID >> PRIM_ID_BITS;
+        uint primID = aabbID & PRIM_ID_MASK;
 
-        Triangle tri = triFetch(meshID, primID);
-        
-        for (uint s = 0; s < AA_SAMPLES; s++)
+        uint meshTriCount = g_meshInfo[meshID].triCount;
+        for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
         {
-            float3 rayOrigin;
-            float3 rayDir;
-            GenerateCameraRay(
-                uint2(pixelDimX, pixelDimY),
-                float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
-                rayOrigin, rayDir);
+            // TODO: remove this in favor of inserting a duplicate or degenerate triangle
+            if (triID >= meshTriCount)
+                break;
 
-            float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
-
-            if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
-                uvwt.w < nearestT[s])
+            Triangle tri = triFetch(meshID, triID);
+        
+            for (uint s = 0; s < AA_SAMPLES; s++)
             {
-                nearestT[s] = uvwt.w;
-                nearestID[s] = id;
+                float3 rayOrigin;
+                float3 rayDir;
+                GenerateCameraRay(
+                    uint2(pixelDimX, pixelDimY),
+                    float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
+                    rayOrigin, rayDir);
+
+                float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
+
+                if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
+                    uvwt.w < nearestT[s])
+                {
+                    nearestT[s] = uvwt.w;
+                    nearestID[s] = (meshID << PRIM_ID_BITS) | triID;
+                }
             }
         }
     }
@@ -219,6 +227,7 @@ void BeamsQuadVis(
             // emit the current quad
             if (matchID != BAD_TRI_ID ||    // don't emit the first placeholder BAD_TRI_ID quad...
                 quadDone)                   // ...unless we reached the end without any valid hits
+// TODO: remove quadDone and the BAD_TRI_ID special quad case, now that we have a shade quad count
             {
                 EmitQuad(
                     tileIndex,
