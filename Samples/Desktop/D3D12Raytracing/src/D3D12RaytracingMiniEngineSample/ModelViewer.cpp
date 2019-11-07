@@ -59,6 +59,14 @@ using namespace Math;
 using namespace Graphics;
 
 BoolVar enableMsaa("Application/Raytracing/enableMsaa", true);
+BoolVar freezeCamera("Application/Raytracing/freezeCamera", false);
+namespace EngineProfiling
+{
+    extern BoolVar DrawProfiler;
+    extern BoolVar ExpandAll;
+}
+
+#define PROFILE_MODE 1 // pre-set a bunch of config vars to facilitate quick profiling iteration times
 
 CComPtr<ID3D12Device5> g_pRaytracingDevice;
 
@@ -1079,6 +1087,12 @@ void DxrMsaaDemo::Startup()
     PostEffects::EnableHDR = false;
     PostEffects::EnableAdaptation = false;
     SSAO::Enable = false;
+
+#if PROFILE_MODE
+    freezeCamera = true;
+    EngineProfiling::DrawProfiler = true;
+    EngineProfiling::ExpandAll = true;
+#endif
 }
 
 void DxrMsaaDemo::Cleanup()
@@ -1105,14 +1119,12 @@ void DxrMsaaDemo::Update( float deltaT )
     if (GameInput::IsFirstPressed(GameInput::kKey_m))
         enableMsaa = !enableMsaa;
     
-    static bool freezeCamera = false;
-    
     if (GameInput::IsFirstPressed(GameInput::kKey_f))
     {
         freezeCamera = !freezeCamera;
     }
 
-    if (GameInput::IsFirstPressed(GameInput::kKey_left))
+    /*if (GameInput::IsFirstPressed(GameInput::kKey_left))
     {
         m_CameraPosArrayCurrentPosition = (m_CameraPosArrayCurrentPosition + c_NumCameraPositions - 1) % c_NumCameraPositions;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
@@ -1121,7 +1133,7 @@ void DxrMsaaDemo::Update( float deltaT )
     {
         m_CameraPosArrayCurrentPosition = (m_CameraPosArrayCurrentPosition + 1) % c_NumCameraPositions;
         SetCameraToPredefinedPosition(m_CameraPosArrayCurrentPosition);
-    }
+    }*/
 
     if (!freezeCamera) 
     {
@@ -1365,7 +1377,10 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(
         m_tilesX, m_tilesY);
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Beam.m_pPSO);
-    pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
+    {
+        ScopedTimer _p0(L"Beam Trace", context);
+        pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
+    }
 
     // done with beam traversal, switch to post processing
     context.InsertUAVBarrier(m_tileTriCounts);
@@ -1381,7 +1396,10 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
 
     // quad visibility
     pRaytracingCommandList->SetPipelineState(g_BeamVisPSO.GetPipelineStateObject());
-    pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
+    {
+        ScopedTimer _p0(L"Quad Vis", context);
+        pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
+    }
 
     context.InsertUAVBarrier(m_tileShadeQuads);
     context.InsertUAVBarrier(m_tileShadeQuadsCount);
@@ -1389,7 +1407,10 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
 
     // quad shading
     pRaytracingCommandList->SetPipelineState(g_BeamShadePSO.GetPipelineStateObject());
-    pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
+    {
+        ScopedTimer _p0(L"Quad Shade", context);
+        pRaytracingCommandList->Dispatch(m_tilesX, m_tilesY, 1);
+    }
 }
 
 void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)

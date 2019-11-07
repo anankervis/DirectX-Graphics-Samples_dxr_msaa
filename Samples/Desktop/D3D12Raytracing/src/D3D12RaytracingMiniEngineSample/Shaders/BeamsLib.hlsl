@@ -3,15 +3,7 @@
 #include "RayCommon.h"
 #include "RayGen.h"
 
-/*
-Record the triangle and move on. We'll compute coverage later.
-
-Yes, it would be nice to have per-sample coverage auto-generated and fed into this function...
-...but how would that work with beams?
-
-Single-pixel rays w/ MSAA can be treated as a collection of 2, 4, 8, 16 subrays w/ coverage mask.
-Beams represent the conservative volume, which may be a collection of pixels or a spatial query.
-*/
+// Record the triangle and move on. We'll compute coverage later.
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {

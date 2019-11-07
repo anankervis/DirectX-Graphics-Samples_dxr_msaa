@@ -423,6 +423,7 @@ namespace EngineProfiling
 {
     BoolVar DrawFrameRate("Display Frame Rate", true);
     BoolVar DrawProfiler("Display Profiler", false);
+    BoolVar ExpandAll("Expand All Profile Nodes", false);
     //BoolVar DrawPerfGraph("Display Performance Graph", false);
     const bool DrawPerfGraph = false;
     
@@ -560,6 +561,9 @@ void NestedTimingTree::Update( void )
 
 void NestedTimingTree::DisplayNode( TextContext& Text, float leftMargin, float indent )
 {
+    if (EngineProfiling::ExpandAll)
+        m_IsExpanded = true;
+
     if (this == &sm_RootScope)
     {
         m_IsExpanded = true;
