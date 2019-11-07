@@ -84,6 +84,9 @@ struct DynamicCB
     float4x4 cameraToWorld;
     float3 worldCameraPosition;
 
+    float jitterNormalizedX;
+    float jitterNormalizedY;
+
     uint tilesX;
     uint tilesY;
 };

@@ -1273,6 +1273,10 @@ void DxrMsaaDemo::RaytraceDiffuse(
         Transpose(Invert(camera.GetViewMatrix()));
     memcpy(&inputs.cameraToWorld, &viewToWorld, sizeof(inputs.cameraToWorld));
     memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
+    float jitterX, jitterY;
+    TemporalEffects::GetJitterOffset(jitterX, jitterY);
+    inputs.jitterNormalizedX = jitterX / g_SceneColorBuffer.GetWidth() * 2.0f;
+    inputs.jitterNormalizedY = jitterY / g_SceneColorBuffer.GetHeight() * 2.0f;
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));
 
     ShadeConstants shadeConstants = {};
@@ -1319,6 +1323,10 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
         Transpose(Invert(camera.GetViewMatrix()));
     memcpy(&inputs.cameraToWorld, &viewToWorld, sizeof(inputs.cameraToWorld));
     memcpy(&inputs.worldCameraPosition, &camera.GetPosition(), sizeof(inputs.worldCameraPosition));
+    float jitterX, jitterY;
+    TemporalEffects::GetJitterOffset(jitterX, jitterY);
+    inputs.jitterNormalizedX = jitterX / g_SceneColorBuffer.GetWidth() * 2.0f;
+    inputs.jitterNormalizedY = jitterY / g_SceneColorBuffer.GetHeight() * 2.0f;
     inputs.tilesX = m_tilesX;
     inputs.tilesY = m_tilesY;
     context.WriteBuffer(g_dynamicConstantBuffer, 0, &inputs, sizeof(inputs));

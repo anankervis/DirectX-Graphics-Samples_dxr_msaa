@@ -51,10 +51,10 @@ inline void GenerateCameraRay(
     out float3 origin,
     out float3 direction)
 {
-    // Note - MiniEngine uses a .5 pixel offset baked into its viewport, even with TAA disabled,
-    // so to match that we do not shoot the rays from the pixel center, we shoot them from the corners.
-    float2 xy = pixelPos;// + .5;
+    float2 xy = pixelPos + .5f;
     float2 screenPos = xy / float2(pixelDim) * 2.0 - 1.0;
+
+    screenPos -= float2(dynamicConstants.jitterNormalizedX, dynamicConstants.jitterNormalizedY);
 
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;
