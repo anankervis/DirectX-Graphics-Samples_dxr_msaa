@@ -26,7 +26,8 @@
 #define TILE_DIM_X (1 << TILE_DIM_LOG2_X)
 #define TILE_DIM_Y (1 << TILE_DIM_LOG2_Y)
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
-#define TILE_MAX_LEAVES (512 / TRIS_PER_AABB) // adjust this according to max estimated tri density
+#define TILE_MAX_TRIS 512 // adjust this according to max estimated tri density
+#define TILE_MAX_LEAVES (TILE_MAX_TRIS / TRIS_PER_AABB)
 
 #define WAVE_SIZE 32
 

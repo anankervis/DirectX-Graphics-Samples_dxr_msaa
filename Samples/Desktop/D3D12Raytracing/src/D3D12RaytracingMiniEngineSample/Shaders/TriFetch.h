@@ -5,8 +5,8 @@
 struct Triangle
 {
     float3 v0;
-    float3 v1;
-    float3 v2;
+    float3 e0;
+    float3 e1;
 };
 
 struct TriInterpolated
@@ -50,8 +50,11 @@ Triangle triFetch(uint meshID, uint primID)
 
     Triangle tri;
     tri.v0 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.x * mesh.attrStride));
-    tri.v1 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.y * mesh.attrStride));
-    tri.v2 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.z * mesh.attrStride));
+    float3 v1 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.y * mesh.attrStride));
+    float3 v2 = asfloat(g_attributes.Load3(mesh.attrOffsetPos + indices.z * mesh.attrStride));
+
+    tri.e0 = v1 - tri.v0;
+    tri.e1 = v2 - tri.v0;
 
     return tri;
 }

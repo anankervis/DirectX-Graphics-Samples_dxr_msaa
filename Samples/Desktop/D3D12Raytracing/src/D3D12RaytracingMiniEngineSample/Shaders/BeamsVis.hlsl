@@ -8,8 +8,6 @@
 
 #pragma warning (disable: 3078) // this doesn't seem to work with the new HLSL compiler...
 
-#define DEBUG_SSAA 0 // enable to emit one shade quad per sample, per pixel, for debugging
-
 struct ShadePixel
 {
     uint id; // mesh + primitive IDs
@@ -20,6 +18,15 @@ struct ShadePixel
 #define SORT_T uint
 #define SORT_CMP_LESS(a, b) (a < b)
 #include "Sort.h"
+
+struct TriCacheEntry
+{
+    Triangle tri;
+    uint id;
+};
+// TODO: we're using too much shared mem... need larger tiles, or refetch the tris
+groupshared TriCacheEntry triCache[TILE_MAX_TRIS];
+groupshared uint triCacheSize;
 
 groupshared uint tileQuadCount;
 
@@ -92,6 +99,8 @@ void BeamsQuadVis(
     uint tileY = groupID.y;
     uint tileIndex = tileY * dynamicConstants.tilesX + tileX;
     uint threadID = groupThreadID.x;
+    uint laneID = threadID % WAVE_SIZE;
+    uint laneMaskLT = (1 << laneID) - 1;
     uint quadLocalIndex = threadID & (QUAD_SIZE - 1);
     uint quadIndex = threadID / QUAD_SIZE;
     uint quadLaneMask = uint((1 << QUAD_SIZE) - 1) << (quadIndex * QUAD_SIZE);
@@ -117,14 +126,16 @@ void BeamsQuadVis(
         return;
     }
 
-    float nearestT[AA_SAMPLES];
-    uint nearestID[AA_SAMPLES];
-    {for (uint s = 0; s < AA_SAMPLES; s++)
+    if (threadID == 0)
     {
-        nearestT[s] = FLT_MAX;
-        nearestID[s] = BAD_TRI_ID;
-    }}
-    for (uint tileLeafIndex = 0; tileLeafIndex < tileLeafCount; tileLeafIndex++)
+        triCacheSize = 0;
+        tileQuadCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // threads cooperate to fetch and coarse cull the triangles
+// TODO: one tri per thread, instead of one leaf per thread, once we get TRIS_PER_AABB > 1
+    for (uint tileLeafIndex = threadID; tileLeafIndex < tileLeafCount; tileLeafIndex += TILE_SIZE)
     {
         uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
         uint meshID = aabbID >> PRIM_ID_BITS;
@@ -139,58 +150,58 @@ void BeamsQuadVis(
 
             Triangle tri = triFetch(meshID, triID);
         
-            for (uint s = 0; s < AA_SAMPLES; s++)
+            uint appendMask = WaveActiveBallot(true).x;
+            uint appendCount = countbits(appendMask);
+            uint appendSlotBase;
+            if (laneID == 0)
+                InterlockedAdd(triCacheSize, appendCount, appendSlotBase);
+            appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
+            uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
+
+            triCache[appendSlot].tri = tri;
+            triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    float nearestT[AA_SAMPLES];
+// TODO: nearestID can be moved to groupshared to reduce register pressure
+// (but should be moved back to registers for the sort)
+    uint nearestID[AA_SAMPLES];
+    {for (uint s = 0; s < AA_SAMPLES; s++)
+    {
+        nearestT[s] = FLT_MAX;
+        nearestID[s] = BAD_TRI_ID;
+    }}
+    for (uint cacheIndex = 0; cacheIndex < triCacheSize; cacheIndex++)
+    {
+        Triangle tri = triCache[cacheIndex].tri;
+        uint id = triCache[cacheIndex].id;
+
+        for (uint s = 0; s < AA_SAMPLES; s++)
+        {
+            float3 rayOrigin;
+            float3 rayDir;
+            GenerateCameraRay(
+                uint2(pixelDimX, pixelDimY),
+                float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
+                rayOrigin, rayDir);
+
+            float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
+
+            if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
+                uvwt.w < nearestT[s])
             {
-                float3 rayOrigin;
-                float3 rayDir;
-                GenerateCameraRay(
-                    uint2(pixelDimX, pixelDimY),
-                    float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
-                    rayOrigin, rayDir);
-
-                float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
-
-                if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
-                    uvwt.w < nearestT[s])
-                {
-                    nearestT[s] = uvwt.w;
-                    nearestID[s] = (meshID << PRIM_ID_BITS) | triID;
-                }
+                nearestT[s] = uvwt.w;
+                nearestID[s] = id;
             }
         }
     }
-
-#if DEBUG_SSAA
-    {
-        uint localOutputSlot = 0;
-        for (uint s = 0; s < AA_SAMPLES; s++)
-        {
-            uint id = nearestID[s];
-            if (id == BAD_TRI_ID)
-                continue;
-
-            ShadeQuad shadeQuad;
-            shadeQuad.id = id;
-            shadeQuad.bits = quadIndex;
-            shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * quadLocalIndex);
-
-            g_tileShadeQuads[tileIndex].quads[threadID * AA_SAMPLES + localOutputSlot] = shadeQuad;
-            localOutputSlot++;
-        }
-    }
-    if (threadID == 0)
-        g_tileShadeQuadsCount[tileIndex] = MAX_SHADE_QUADS_PER_TILE;
-    return;
-#endif
 
     // Beware packing bits into the sort key and/or sign-extending it on unpack like HVVR does...
     // HLSL likes to silently convert uint to int (for example, the min intrinsic).
     sortBitonic(nearestID);
 // TODO: move sort result into groupshared for indexing code gen?
-
-    if (threadID == 0)
-        tileQuadCount = 0;
-    GroupMemoryBarrierWithGroupSync();
 
     uint matchID = BAD_TRI_ID;
     uint localS = 0;
