@@ -16,7 +16,7 @@
 #define AA_SAMPLES (1 << AA_SAMPLES_LOG2)
 #define AA_SAMPLE_MASK ((uint(1) << AA_SAMPLES) - 1)
 
-#define TRIS_PER_AABB 2
+#define TRIS_PER_AABB 1
 #define PRIM_ID_BITS 16
 #define PRIM_ID_MASK ((1 << PRIM_ID_BITS) - 1)
 
@@ -26,7 +26,7 @@
 #define TILE_DIM_X (1 << TILE_DIM_LOG2_X)
 #define TILE_DIM_Y (1 << TILE_DIM_LOG2_Y)
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
-#define TILE_MAX_LEAVES 256
+#define TILE_MAX_LEAVES (512 / TRIS_PER_AABB) // adjust this according to max estimated tri density
 
 #define WAVE_SIZE 32
 

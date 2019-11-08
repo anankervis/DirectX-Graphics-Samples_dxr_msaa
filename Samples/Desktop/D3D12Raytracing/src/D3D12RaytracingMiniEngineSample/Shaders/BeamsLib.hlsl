@@ -32,6 +32,11 @@ void Intersection()
     ReportHit(tHitAABB, 0, attr);
 }
 
+[shader("miss")]
+void Miss(inout BeamPayload payload)
+{
+}
+
 [shader("raygeneration")]
 void RayGen()
 {
@@ -48,5 +53,5 @@ void RayGen()
 
     BeamPayload payload;
 
-    TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+    TraceRay(g_accel, RAY_FLAG_NONE, ~0, 0, 1, 0, rayDesc, payload);
 }

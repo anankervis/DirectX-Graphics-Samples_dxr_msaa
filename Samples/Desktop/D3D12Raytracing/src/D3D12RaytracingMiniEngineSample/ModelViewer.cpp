@@ -674,7 +674,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             { exportName_Intersection, nullptr, D3D12_EXPORT_FLAG_NONE },
             { exportName_AnyHit, nullptr, D3D12_EXPORT_FLAG_NONE },
 //            { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
-//            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
         };
         D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
         {
@@ -747,21 +747,31 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     }
 }
 
-// TODO: could pair up triangles
 void DxrMsaaDemo::createAABBs()
 {
-    Matrix4 viewToWorld = 
-        Matrix4::MakeScale(
-            Vector3(
-                1.0f / m_Camera.GetProjMatrix().GetX().GetX(),
-                1.0f / m_Camera.GetProjMatrix().GetY().GetY(),
-                1.0f)) *
-        Transpose(Invert(m_Camera.GetViewMatrix()));
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+    float camPosX = m_Camera.GetPosition().GetX();
+    float camPosY = m_Camera.GetPosition().GetY();
+    float camPosZ = m_Camera.GetPosition().GetZ();
 
-    Vector3 d00 = Matrix3(viewToWorld) * Vector3(-1, -1, -1);
-    Vector3 d10 = Matrix3(viewToWorld) * Vector3(-1 + 2.0f / m_tilesX, -1, -1);
-    Vector3 d01 = Matrix3(viewToWorld) * Vector3(-1, -1 + 2.0f / m_tilesY, -1);
-    float maxTileSize = max(Length(d10 - d00), Length(d01 - d00));
+    float camRightX = m_Camera.GetRightVec().GetX();
+    float camRightY = m_Camera.GetRightVec().GetY();
+    float camRightZ = m_Camera.GetRightVec().GetZ();
+
+    float camUpX = m_Camera.GetUpVec().GetX();
+    float camUpY = m_Camera.GetUpVec().GetY();
+    float camUpZ = m_Camera.GetUpVec().GetZ();
+
+    float camForwardX = m_Camera.GetForwardVec().GetX();
+    float camForwardY = m_Camera.GetForwardVec().GetY();
+    float camForwardZ = m_Camera.GetForwardVec().GetZ();
+
+    float camFoV = m_Camera.GetFOV();
+    float camAspect = float(g_SceneColorBuffer.GetWidth()) / g_SceneColorBuffer.GetHeight();
+
+    float tileSizeXAt1 = tanf(camFoV * .5f) * camAspect / m_tilesX;
+    float tileSizeYAt1 = tanf(camFoV * .5f) / m_tilesY;
+#endif
 
     uint32_t meshCount = m_Model.m_Header.meshCount;
     std::vector<D3D12_RAYTRACING_AABB> aabbs;
@@ -808,36 +818,33 @@ void DxrMsaaDemo::createAABBs()
             }
 
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
-            float camPosX = m_Camera.GetPosition().GetX();
-            float camPosY = m_Camera.GetPosition().GetY();
-            float camPosZ = m_Camera.GetPosition().GetZ();
-
-            float aabbCenterX = (aabb.MinX + aabb.MaxX) * .5f;
-            float aabbCenterY = (aabb.MinY + aabb.MaxY) * .5f;
-            float aabbCenterZ = (aabb.MinZ + aabb.MaxZ) * .5f;
-
-            float centerDeltaX = aabbCenterX - camPosX;
-            float centerDeltaY = aabbCenterY - camPosY;
-            float centerDeltaZ = aabbCenterZ - camPosZ;
-
-            float aabbPPointX = centerDeltaX < 0 ? aabb.MinX : aabb.MaxX;
-            float aabbPPointY = centerDeltaY < 0 ? aabb.MinY : aabb.MaxY;
-            float aabbPPointZ = centerDeltaZ < 0 ? aabb.MinZ : aabb.MaxZ;
+            float aabbPPointX = camForwardX < 0 ? aabb.MinX : aabb.MaxX;
+            float aabbPPointY = camForwardY < 0 ? aabb.MinY : aabb.MaxY;
+            float aabbPPointZ = camForwardZ < 0 ? aabb.MinZ : aabb.MaxZ;
 
             float dx = aabbPPointX - camPosX;
             float dy = aabbPPointY - camPosY;
             float dz = aabbPPointZ - camPosZ;
-            float d = sqrtf(dx * dx + dy * dy + dz * dz);
 
-            float tileSizeAtD = maxTileSize * d;
-            float expansion = tileSizeAtD * .3f; // hmmm... I was expecting .5 * tileSize, but .3 seems to work...
+            float d = dx * camForwardX + dy * camForwardY + dz * camForwardZ;
 
-            aabb.MinX -= expansion;
-            aabb.MinY -= expansion;
-            aabb.MinZ -= expansion;
-            aabb.MaxX += expansion;
-            aabb.MaxY += expansion;
-            aabb.MaxZ += expansion;
+            if (d < 0)
+                d = 0;
+
+            float expansionScreenX = tileSizeXAt1 * d;
+            float expansionScreenY = tileSizeYAt1 * d;
+
+            float expansionX = fabsf(camRightX) * expansionScreenX + fabsf(camUpX) * expansionScreenY;
+            float expansionY = fabsf(camRightY) * expansionScreenX + fabsf(camUpY) * expansionScreenY;
+            float expansionZ = fabsf(camRightZ) * expansionScreenX + fabsf(camUpZ) * expansionScreenY;
+
+            aabb.MinX -= expansionX;
+            aabb.MinY -= expansionY;
+            aabb.MinZ -= expansionZ;
+
+            aabb.MaxX += expansionX;
+            aabb.MaxY += expansionY;
+            aabb.MaxZ += expansionZ;
 #endif
 
             aabbs.push_back(aabb);
@@ -1024,10 +1031,15 @@ void DxrMsaaDemo::Startup()
     bool bModelLoadSuccess = m_Model.Load(ASSET_DIRECTORY "Models/sponza.h3d", true);
     ASSERT(bModelLoadSuccess, "Failed to load model");
     ASSERT(m_Model.m_Header.meshCount > 0, "Model contains no meshes");
+// get rid of the floating giant white curtain...
+memmove(m_Model.m_pMesh + 4, m_Model.m_pMesh + 5, sizeof(Model::Mesh) * (m_Model.m_Header.meshCount - 5));
+m_Model.m_Header.meshCount -= 1;
 
     float modelRadius = Length(m_Model.m_Header.boundingBox.max - m_Model.m_Header.boundingBox.min) * .5f;
-    const Vector3 eye = (m_Model.m_Header.boundingBox.min + m_Model.m_Header.boundingBox.max) * .5f + Vector3(modelRadius * .5f, 0.0f, 0.0f);
-    m_Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
+    //const Vector3 eye = (m_Model.m_Header.boundingBox.min + m_Model.m_Header.boundingBox.max) * .5f + Vector3(modelRadius * .5f, 0.0f, 0.0f);
+    //m_Camera.SetEyeAtUp( eye, Vector3(kZero), Vector3(kYUnitVector) );
+    const Vector3 eye = Vector3(modelRadius * .5f, 150.0f, 0.0f);
+    m_Camera.SetEyeAtUp( eye, eye + Vector3(-1, 0, 0), Vector3(kYUnitVector) );
     m_Camera.SetZRange( 1.0f, 10000.0f );
     m_Camera.Update();
 
@@ -1389,6 +1401,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
         pRaytracingCommandList->DispatchRays(&dispatchRaysDesc);
     }
 
+// TODO: beam tracing probably isn't fully utilizing the GPU, ideally we'd run these next two shaders in parallel with it
     // done with beam traversal, switch to post processing
     context.InsertUAVBarrier(m_tileLeafCounts);
     context.InsertUAVBarrier(m_tileLeaves);
