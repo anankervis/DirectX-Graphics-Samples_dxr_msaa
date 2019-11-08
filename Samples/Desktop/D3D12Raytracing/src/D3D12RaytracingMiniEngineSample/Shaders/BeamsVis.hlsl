@@ -19,14 +19,15 @@ struct ShadePixel
 #define SORT_CMP_LESS(a, b) (a < b)
 #include "Sort.h"
 
+#define TRI_CACHE_SIZE WAVE_SIZE
+
 struct TriCacheEntry
 {
     Triangle tri;
     uint id;
 };
-// TODO: we're using too much shared mem... need larger tiles, or refetch the tris
-groupshared TriCacheEntry triCache[TILE_MAX_TRIS];
-groupshared uint triCacheSize;
+groupshared TriCacheEntry triCache[TRI_CACHE_SIZE];
+groupshared uint triCacheCount;
 
 groupshared uint tileQuadCount;
 
@@ -128,39 +129,8 @@ void BeamsQuadVis(
 
     if (threadID == 0)
     {
-        triCacheSize = 0;
+        triCacheCount = 0;
         tileQuadCount = 0;
-    }
-    GroupMemoryBarrierWithGroupSync();
-
-    // threads cooperate to fetch and coarse cull the triangles
-// TODO: one tri per thread, instead of one leaf per thread, once we get TRIS_PER_AABB > 1
-    for (uint tileLeafIndex = threadID; tileLeafIndex < tileLeafCount; tileLeafIndex += TILE_SIZE)
-    {
-        uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
-        uint meshID = aabbID >> PRIM_ID_BITS;
-        uint primID = aabbID & PRIM_ID_MASK;
-
-        uint meshTriCount = g_meshInfo[meshID].triCount;
-        for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
-        {
-            // TODO: remove this in favor of inserting a duplicate or degenerate triangle
-            if (triID >= meshTriCount)
-                break;
-
-            Triangle tri = triFetch(meshID, triID);
-        
-            uint appendMask = WaveActiveBallot(true).x;
-            uint appendCount = countbits(appendMask);
-            uint appendSlotBase;
-            if (laneID == 0)
-                InterlockedAdd(triCacheSize, appendCount, appendSlotBase);
-            appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
-            uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
-
-            triCache[appendSlot].tri = tri;
-            triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
-        }
     }
     GroupMemoryBarrierWithGroupSync();
 
@@ -173,29 +143,76 @@ void BeamsQuadVis(
         nearestT[s] = FLT_MAX;
         nearestID[s] = BAD_TRI_ID;
     }}
-    for (uint cacheIndex = 0; cacheIndex < triCacheSize; cacheIndex++)
+
+    // threads cooperate to fetch and coarse cull the triangles
+// TODO: one tri per thread, instead of one leaf per thread, once we get TRIS_PER_AABB > 1
+    uint fetchIterations = (tileLeafCount + TILE_SIZE - 1) / TILE_SIZE;
+    for (uint f = 0; f < fetchIterations; f++)
     {
-        Triangle tri = triCache[cacheIndex].tri;
-        uint id = triCache[cacheIndex].id;
+        uint tileLeafIndex = f * TILE_SIZE + threadID;
 
-        for (uint s = 0; s < AA_SAMPLES; s++)
+        if (tileLeafIndex < tileLeafCount)
         {
-            float3 rayOrigin;
-            float3 rayDir;
-            GenerateCameraRay(
-                uint2(pixelDimX, pixelDimY),
-                float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
-                rayOrigin, rayDir);
+            uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
+            uint meshID = aabbID >> PRIM_ID_BITS;
+            uint primID = aabbID & PRIM_ID_MASK;
 
-            float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
-
-            if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
-                uvwt.w < nearestT[s])
+            uint meshTriCount = g_meshInfo[meshID].triCount;
+            for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
             {
-                nearestT[s] = uvwt.w;
-                nearestID[s] = id;
+                // TODO: remove this in favor of inserting a duplicate or degenerate triangle
+                if (triID >= meshTriCount)
+                    break;
+
+                Triangle tri = triFetch(meshID, triID);
+        
+                uint appendMask = WaveActiveBallot(true).x;
+                uint appendCount = countbits(appendMask);
+                uint appendSlotBase;
+                if (laneID == 0)
+                    InterlockedAdd(triCacheCount, appendCount, appendSlotBase);
+                appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
+                uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
+
+                triCache[appendSlot].tri = tri;
+                triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
             }
         }
+
+// TODO: at this point, we could check for cache capacity and use a "continue" statement to keep accumulating
+
+        GroupMemoryBarrierWithGroupSync();
+
+        // process the surviving triangles in the cache
+        for (uint cacheIndex = 0; cacheIndex < triCacheCount; cacheIndex++)
+        {
+            Triangle tri = triCache[cacheIndex].tri;
+            uint id = triCache[cacheIndex].id;
+
+            for (uint s = 0; s < AA_SAMPLES; s++)
+            {
+                float3 rayOrigin;
+                float3 rayDir;
+                GenerateCameraRay(
+                    uint2(pixelDimX, pixelDimY),
+                    float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
+                    rayOrigin, rayDir);
+
+                float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
+
+                if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
+                    uvwt.w < nearestT[s])
+                {
+                    nearestT[s] = uvwt.w;
+                    nearestID[s] = id;
+                }
+            }
+        }
+
+        // reset the cache
+        if (threadID == 0)
+            triCacheCount = 0;
+        GroupMemoryBarrierWithGroupSync();
     }
 
     // Beware packing bits into the sort key and/or sign-extending it on unpack like HVVR does...
