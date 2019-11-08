@@ -165,7 +165,13 @@ void BeamsQuadVis(
                     break;
 
                 Triangle tri = triFetch(meshID, triID);
-        
+
+                // test the triangle against the tile frustum's planes
+
+                // test for backfacing and intersection before ray origin
+
+                // test UVW overlap
+
                 uint appendMask = WaveActiveBallot(true).x;
                 uint appendCount = countbits(appendMask);
                 uint appendSlotBase;
