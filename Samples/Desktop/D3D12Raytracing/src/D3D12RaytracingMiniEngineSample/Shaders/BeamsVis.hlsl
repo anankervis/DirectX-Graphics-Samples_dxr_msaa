@@ -38,7 +38,7 @@ groupshared uint qr_uint[TILE_SIZE];
 void EmitQuad(
     uint tileIndex,
     uint threadID, uint quadIndex, uint quadLocalIndex,
-    uint id, uint localMatchCount, bool quadDone)
+    uint id, uint localMatchCount)
 {
 #if QUAD_READ_GROUPSHARED_FALLBACK
     qr_uint[threadID] = localMatchCount;
@@ -60,14 +60,12 @@ void EmitQuad(
     ShadeQuad shadeQuad;
     shadeQuad.id = id;
     shadeQuad.bits = quadIndex;
-    if (quadDone)
-        shadeQuad.bits |= 1 << (QUADS_PER_TILE_LOG2 + 0);
     if (id != BAD_TRI_ID)
     {
-        shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 0);
-        shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 1);
-        shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 2);
-        shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * 3);
+        shadeQuad.bits |= matchCount00 << (QUADS_PER_TILE_LOG2 + (AA_SAMPLES_LOG2 + 1) * 0);
+        shadeQuad.bits |= matchCount10 << (QUADS_PER_TILE_LOG2 + (AA_SAMPLES_LOG2 + 1) * 1);
+        shadeQuad.bits |= matchCount01 << (QUADS_PER_TILE_LOG2 + (AA_SAMPLES_LOG2 + 1) * 2);
+        shadeQuad.bits |= matchCount11 << (QUADS_PER_TILE_LOG2 + (AA_SAMPLES_LOG2 + 1) * 3);
     }
 
     if (quadLocalIndex == 0)
@@ -198,7 +196,7 @@ void BeamsQuadVis(
             }
         }
 
-// TODO: at this point, we could check for cache capacity and use a "continue" statement to keep accumulating
+// TODO: at this point, we could check for tri cache capacity and use a "continue" statement to keep accumulating
 
         GroupMemoryBarrierWithGroupSync();
 
@@ -273,17 +271,15 @@ void BeamsQuadVis(
 #endif
         uint minID = min(min(id00, id10), min(id01, id11));
 
-        if (minID != matchID || quadDone)
+        if (minID != matchID)
         {
             // emit the current quad
-            if (matchID != BAD_TRI_ID ||    // don't emit the first placeholder BAD_TRI_ID quad...
-                quadDone)                   // ...unless we reached the end without any valid hits
-// TODO: remove quadDone and the BAD_TRI_ID special quad case, now that we have a shade quad count
+            if (matchID != BAD_TRI_ID) // don't emit the first placeholder BAD_TRI_ID quad
             {
                 EmitQuad(
                     tileIndex,
                     threadID, quadIndex, quadLocalIndex,
-                    matchID, localMatchCount, quadDone);
+                    matchID, localMatchCount);
             }
 
             // start a new quad

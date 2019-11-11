@@ -99,7 +99,6 @@ struct ShadeQuad
     uint id; // mesh + primitive IDs
     // QUADS_PER_TILE_LOG2_X bits: X quad pos within tile
     // QUADS_PER_TILE_LOG2_Y bits: Y quad pos within tile
-    // 1 bit: quad done (once per final pixel quad, there will be QUADS_PER_TILE of these per tile)
     // (AA_SAMPLES_LOG2 + 1) bits * QUAD_SIZE: sample count - 1
     uint bits;
 };

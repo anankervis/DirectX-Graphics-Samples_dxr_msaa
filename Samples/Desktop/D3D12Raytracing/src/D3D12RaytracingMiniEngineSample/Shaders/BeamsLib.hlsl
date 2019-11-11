@@ -45,10 +45,11 @@ void Intersection()
         uint meshID = rootConstants.meshID;
         uint primID = PrimitiveIndex();
 
-// TODO: this is only needed if TRIS_PER_AABB > 1
+#if TRIS_PER_AABB > 1
         uint meshTriCount = g_meshInfo[meshID].triCount;
+#endif
 
-        // TODO: some of this work could probably be precomputed
+        // TODO: some of this could probably be precomputed
         float3 tileOrigin;
         float3 tileDirs[4];
         GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
@@ -59,7 +60,9 @@ void Intersection()
         {
             TriTile triTile;
 
+#if TRIS_PER_AABB > 1
             if (triID < meshTriCount)
+#endif
             {
                 PERF_COUNTER(intersectTrisIn, 1);
                 Triangle tri = triFetch(meshID, triID);

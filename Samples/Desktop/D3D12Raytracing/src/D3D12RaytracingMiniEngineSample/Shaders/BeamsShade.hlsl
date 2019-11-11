@@ -180,8 +180,7 @@ void BeamsQuadShade(
         inputSlot += QUADS_PER_TILE;
 
         uint quadIndex = shadeQuad.bits & (QUADS_PER_TILE - 1);
-        bool quadDone = (shadeQuad.bits & (1 << (QUADS_PER_TILE_LOG2 + 0))) != 0;
-        uint sampleCount = shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + 1 + (AA_SAMPLES_LOG2 + 1) * quadLocalIndex);
+        uint sampleCount = shadeQuad.bits >> (QUADS_PER_TILE_LOG2 + (AA_SAMPLES_LOG2 + 1) * quadLocalIndex);
         sampleCount &= (1 << (AA_SAMPLES_LOG2 + 1)) - 1;
 
         uint fauxThreadID = quadIndex * QUAD_SIZE + quadLocalIndex;
@@ -202,13 +201,6 @@ void BeamsQuadShade(
             rayOriginShade, rayDirShade);
 
         uint id = shadeQuad.id;
-// TODO: remove this, now that we have a shade quad count
-        if (id == BAD_TRI_ID)
-        {
-            // beam traversal found potential triangles for this tile, but none survived past quad visibility test
-            continue;
-        }
-
         uint meshID = id >> PRIM_ID_BITS;
         uint primID = id & PRIM_ID_MASK;
         Triangle tri = triFetch(meshID, primID);
