@@ -176,41 +176,39 @@ void BeamsQuadVis(
             uint meshTriCount = g_meshInfo[meshID].triCount;
             for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
             {
-                // TODO: remove this in favor of inserting a duplicate or degenerate triangle
-                if (triID >= meshTriCount)
-                    break;
-
-                PERF_COUNTER(visTileTrisIn, 1);
-
-                Triangle tri = triFetch(meshID, triID);
-
                 bool outputTri = false;
                 TriTile triTile;
 
-                // test the triangle against the tile frustum's planes
-                if (FrustumTest(tileFrustum, tri))
+                if (triID < meshTriCount)
                 {
-                    // test for backfacing and intersection before ray origin
-                    if (TriTileSetup(tri, tileOrigin, triTile))
+                    PERF_COUNTER(visTileTrisIn, 1);
+                    Triangle tri = triFetch(meshID, triID);
+
+                    // test the triangle against the tile frustum's planes
+                    if (FrustumTest(tileFrustum, tri))
                     {
-                        // test UVW overlap
-                        if (FrustumTestUVW(tileOrigin, tileDirs, tri))
+                        // test for backfacing and intersection before ray origin
+                        if (TriTileSetup(tri, tileOrigin, triTile))
                         {
-                            outputTri = true;
+                            // test UVW interval overlap
+                            if (FrustumTestUVW(tileOrigin, tileDirs, tri))
+                            {
+                                outputTri = true;
+                            }
+                            else
+                            {
+                                PERF_COUNTER(visTileTrisCulledTileUVW, 1);
+                            }
                         }
                         else
                         {
-                            PERF_COUNTER(visTileTrisCulledTileUVW, 1);
+                            PERF_COUNTER(visTileTrisCulledTileSetup, 1);
                         }
                     }
                     else
                     {
-                        PERF_COUNTER(visTileTrisCulledTileSetup, 1);
+                        PERF_COUNTER(visTileTrisCulledTileFrustum, 1);
                     }
-                }
-                else
-                {
-                    PERF_COUNTER(visTileTrisCulledTileFrustum, 1);
                 }
 
                 uint appendMask = WaveActiveBallot(outputTri).x;
