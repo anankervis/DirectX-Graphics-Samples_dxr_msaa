@@ -7,6 +7,8 @@
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {
+    PERF_COUNTER(anyhitCount, 1);
+
     uint tileX = DispatchRaysIndex().x;
     uint tileY = DispatchRaysIndex().y;
     uint tileIndex = tileY * DispatchRaysDimensions().x + tileX;
@@ -25,6 +27,8 @@ void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 [shader("intersection")]
 void Intersection()
 {
+    PERF_COUNTER(intersectCount, 1);
+
     float tHitAABB = RayTCurrent();
 
     BeamHitAttribs attr;
@@ -35,11 +39,14 @@ void Intersection()
 [shader("miss")]
 void Miss(inout BeamPayload payload)
 {
+    PERF_COUNTER(missCount, 1);
 }
 
 [shader("raygeneration")]
 void RayGen()
 {
+    PERF_COUNTER(rayGenCount, 1);
+
     float3 origin, direction;
     GenerateCameraRay(DispatchRaysDimensions().xy, DispatchRaysIndex().xy, origin, direction);
 

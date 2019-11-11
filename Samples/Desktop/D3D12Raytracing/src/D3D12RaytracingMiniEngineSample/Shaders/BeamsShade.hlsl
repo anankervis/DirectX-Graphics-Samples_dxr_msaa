@@ -123,7 +123,7 @@ float3 ShadeQuadThread(
 [RootSignature(
     "CBV(b0),"
     "CBV(b1),"
-    "DescriptorTable(UAV(u2, numDescriptors = 5)),"
+    "DescriptorTable(UAV(u2, numDescriptors = 6)),"
     "DescriptorTable(SRV(t1, numDescriptors = 3)),"
     "DescriptorTable(SRV(t100, numDescriptors = unbounded)),"
     "StaticSampler(s0, maxAnisotropy = 8),"

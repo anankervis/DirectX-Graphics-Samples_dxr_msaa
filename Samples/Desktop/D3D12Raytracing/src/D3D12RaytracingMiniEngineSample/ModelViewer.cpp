@@ -35,6 +35,7 @@
 #include "ShadowCamera.h"
 #include "ParticleEffectManager.h"
 #include "GameInput.h"
+#include "ReadbackBuffer.h"
 
 #include <atlbase.h>
 #include "DXSampleHelper.h"
@@ -245,6 +246,11 @@ private:
     StructuredBuffer m_tileLeaves;
     StructuredBuffer m_tileShadeQuads;
     StructuredBuffer m_tileShadeQuadsCount;
+    StructuredBuffer m_counters;
+
+    enum { countersReadbackCount = 4 };
+    ReadbackBuffer m_countersReadback[countersReadbackCount];
+    uint64_t m_frameIndex;
 
     Vector3 m_SunDirection;
 
@@ -447,6 +453,9 @@ void DxrMsaaDemo::InitializeViews()
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
         Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuadsCount.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+        g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_counters.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     {
@@ -526,7 +535,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
     D3D12_DESCRIPTOR_RANGE1 uavDescriptorRange = {};
     uavDescriptorRange.BaseShaderRegister = 2;
-    uavDescriptorRange.NumDescriptors = 3;
+    uavDescriptorRange.NumDescriptors = 6;
     uavDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     uavDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
 
@@ -731,7 +740,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         g_BeamPostRootSig.Reset(5, 1);
         g_BeamPostRootSig[0].InitAsConstantBuffer(0);
         g_BeamPostRootSig[1].InitAsConstantBuffer(1);
-        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 5);
+        g_BeamPostRootSig[2].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 6);
         g_BeamPostRootSig[3].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 3);
         g_BeamPostRootSig[4].InitAsDescriptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 100, UINT_MAX);
         g_BeamPostRootSig.InitStaticSampler(0, DefaultSamplerDesc);
@@ -985,6 +994,8 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
 
 void DxrMsaaDemo::Startup()
 {
+    m_frameIndex = 0;
+
     ThrowIfFailed(g_Device->QueryInterface(IID_PPV_ARGS(&g_pRaytracingDevice)), L"Couldn't get DirectX Raytracing interface for the device.\n");
 
     g_pRaytracingDescriptorHeap = std::unique_ptr<DescriptorHeapStack>(
@@ -1059,6 +1070,16 @@ m_Model.m_Header.meshCount -= 1;
         m_tileLeaves.Create(L"m_tileLeaves", tileCount, sizeof(TileTri), nullptr);
         m_tileShadeQuads.Create(L"m_tileShadeQuads", tileCount, sizeof(TileShadeQuads), nullptr);
         m_tileShadeQuadsCount.Create(L"m_tileShadeQuadsCount", tileCount, sizeof(uint32_t), nullptr);
+        m_counters.Create(L"m_counters", 1, sizeof(Counters), nullptr);
+
+        for (int n = 0; n < countersReadbackCount; n++)
+        {
+            m_countersReadback[n].Create(L"m_countersReadback", 1, sizeof(Counters));
+
+            Counters *counters = (Counters*)m_countersReadback[n].Map();
+            memset(counters, 0, sizeof(Counters));
+            m_countersReadback[n].Unmap();
+        }
     }
 
     // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
@@ -1288,6 +1309,8 @@ void DxrMsaaDemo::RenderScene()
     Raytrace(gfxContext);
 
     gfxContext.Finish();
+
+    m_frameIndex++;
 }
 
 void DxrMsaaDemo::RaytraceDiffuse(
@@ -1375,7 +1398,6 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.TransitionResource(m_tileLeaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuads, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuadsCount, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.FlushResourceBarriers();
 
     context.ClearUAV(m_tileLeafCounts);
 
@@ -1447,14 +1469,33 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     float primaryRaysPerSec = g_SceneColorBuffer.GetWidth() * g_SceneColorBuffer.GetHeight() * rollingAverageFrameRate / (1000000.0f);
     TextContext text(gfxContext);
     text.Begin();
-    text.DrawFormattedString("\nMillion Primary Rays/s: %7.3f", primaryRaysPerSec);
-    text.DrawFormattedString("\nRenderMode: %s MSAA: %s", renderModeStr[renderMode], enableMsaa ? "Y" : "N");
+    text.SetCursorX(1000);
+    text.SetLeftMargin(1000);
+
+    text.DrawFormattedString("Million Primary Rays/s: %7.3f\n", primaryRaysPerSec);
+    text.DrawFormattedString("RenderMode: %s MSAA: %s\n", renderModeStr[renderMode], enableMsaa ? "Y" : "N");
+
+#if COLLECT_COUNTERS
+    int countersReadIndex = (m_frameIndex + 1) % countersReadbackCount;
+    const Counters *counters = (const Counters*)m_countersReadback[countersReadIndex].Map();
+    text.DrawFormattedString("RayGen: %u\n", counters->rayGenCount);
+    text.DrawFormattedString("Intersect: %u\n", counters->intersectCount);
+    text.DrawFormattedString("Anyhit: %u\n", counters->anyhitCount);
+    text.DrawFormattedString("Miss: %u\n", counters->missCount);
+    m_countersReadback[countersReadIndex].Unmap();
+#endif
+
     text.End();
 }
 
 void DxrMsaaDemo::Raytrace(class GraphicsContext& gfxContext)
 {
     ScopedTimer _prof(L"Raytrace", gfxContext);
+
+#if COLLECT_COUNTERS
+    gfxContext.TransitionResource(m_counters, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+    gfxContext.ClearUAV(m_counters);
+#endif
 
     gfxContext.TransitionResource(g_SSAOFullScreen, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
@@ -1471,6 +1512,17 @@ void DxrMsaaDemo::Raytrace(class GraphicsContext& gfxContext)
         RaytraceDiffuseBeams(gfxContext, m_Camera, g_SceneColorBuffer);
         break;
     }
+
+#if COLLECT_COUNTERS
+    int countersWriteIndex = m_frameIndex % countersReadbackCount;
+
+    gfxContext.InsertUAVBarrier(m_counters);
+    gfxContext.TransitionResource(m_counters, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    gfxContext.TransitionResource(m_countersReadback[countersWriteIndex], D3D12_RESOURCE_STATE_COPY_DEST);
+    gfxContext.FlushResourceBarriers();
+
+    gfxContext.CopyBuffer(m_countersReadback[countersWriteIndex], m_counters);
+#endif
 
     // Clear the gfxContext's descriptor heap since ray tracing changes this underneath the sheets
     gfxContext.SetDescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, nullptr);

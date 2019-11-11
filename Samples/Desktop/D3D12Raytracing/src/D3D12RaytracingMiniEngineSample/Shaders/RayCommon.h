@@ -9,6 +9,8 @@
 // and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
+#define COLLECT_COUNTERS 1
+
 // 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
 // Don't forget to update AA_SAMPLE_OFFSET_TABLE to point to the corresponding table.
 #define AA_SAMPLES_LOG2 3
@@ -50,6 +52,19 @@
 // To be safe, keep this in the +range of a signed int... HLSL silently converts
 // uint to int in a lot of places (for example, the min intrinsic).
 #define BAD_TRI_ID (uint(0x7fffffff))
+
+struct Counters
+{
+    uint rayGenCount;
+    uint intersectCount;
+    uint anyhitCount;
+    uint missCount;
+};
+#if COLLECT_COUNTERS
+# define PERF_COUNTER(counter, value) InterlockedAdd(g_counters[0]. counter, value)
+#else
+# define PERF_COUNTER(counter, value)
+#endif
 
 struct TileTri
 {
@@ -138,6 +153,7 @@ RWStructuredBuffer<uint> g_tileLeafCounts : register(u3);
 RWStructuredBuffer<TileTri> g_tileLeaves : register(u4);
 RWStructuredBuffer<TileShadeQuads> g_tileShadeQuads : register(u5);
 RWStructuredBuffer<uint> g_tileShadeQuadsCount : register(u6);
+RWStructuredBuffer<Counters> g_counters : register(u7);
 
 cbuffer b1 : register(b1)
 {
