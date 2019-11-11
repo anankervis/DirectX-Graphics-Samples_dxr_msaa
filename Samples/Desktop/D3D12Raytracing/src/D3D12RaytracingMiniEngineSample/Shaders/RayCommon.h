@@ -13,8 +13,8 @@
 
 // 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
 // Don't forget to update AA_SAMPLE_OFFSET_TABLE to point to the corresponding table.
-#define AA_SAMPLES_LOG2 3
-#define AA_SAMPLE_OFFSET_TABLE sampleOffset8x
+#define AA_SAMPLES_LOG2 4
+#define AA_SAMPLE_OFFSET_TABLE sampleOffset16x
 #define AA_SAMPLES (1 << AA_SAMPLES_LOG2)
 #define AA_SAMPLE_MASK ((uint(1) << AA_SAMPLES) - 1)
 
@@ -47,7 +47,9 @@
 #define QUADS_PER_TILE (1 << QUADS_PER_TILE_LOG2)
 
 #define MAX_TRIS_PER_QUAD (QUAD_SIZE * AA_SAMPLES)
-#define MAX_SHADE_QUADS_PER_TILE (MAX_TRIS_PER_QUAD * QUADS_PER_TILE)
+//#define MAX_SHADE_QUADS_PER_TILE (MAX_TRIS_PER_QUAD * QUADS_PER_TILE)
+// HLSL compiler doesn't like structured buffer elements to exceed 2048 bytes
+#define MAX_SHADE_QUADS_PER_TILE 256
 
 // To be safe, keep this in the +range of a signed int... HLSL silently converts
 // uint to int in a lot of places (for example, the min intrinsic).
