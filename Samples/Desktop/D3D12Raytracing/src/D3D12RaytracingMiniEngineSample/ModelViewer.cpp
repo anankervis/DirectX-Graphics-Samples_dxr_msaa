@@ -1494,6 +1494,8 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(visTileLeaves);
     PRINT_COUNTER(visTileTrisIn);
     PRINT_COUNTER(visTileTrisCulledTileFrustum);
+    PRINT_COUNTER(visTileTrisCulledTileSetup);
+    PRINT_COUNTER(visTileTrisCulledTileUVW);
     PRINT_COUNTER(visTileTrisPass);
     PRINT_COUNTER(visShadeQuads);
 

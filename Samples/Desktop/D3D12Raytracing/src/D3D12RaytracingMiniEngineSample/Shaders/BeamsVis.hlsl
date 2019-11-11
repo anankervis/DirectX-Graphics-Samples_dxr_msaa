@@ -23,7 +23,7 @@ struct ShadePixel
 
 struct TriCacheEntry
 {
-    Triangle tri;
+    TriTile triTile;
     uint id;
 };
 groupshared TriCacheEntry triCache[TRI_CACHE_SIZE];
@@ -135,9 +135,9 @@ void BeamsQuadVis(
 
     // TODO: some of this work could probably be precomputed
     float3 tileOrigin;
-    float3 tileDir[4];
-    GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDir);
-    Frustum tileFrustum = FrustumCreate(tileOrigin, tileDir);
+    float3 tileDirs[4];
+    GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
+    Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
 
     if (threadID == 0)
     {
@@ -185,20 +185,33 @@ void BeamsQuadVis(
                 Triangle tri = triFetch(meshID, triID);
 
                 bool outputTri = false;
+                TriTile triTile;
 
                 // test the triangle against the tile frustum's planes
                 if (FrustumTest(tileFrustum, tri))
                 {
-                    outputTri = true;
+                    // test for backfacing and intersection before ray origin
+                    if (TriTileSetup(tri, tileOrigin, triTile))
+                    {
+                        // test UVW overlap
+                        if (FrustumTestUVW(tileOrigin, tileDirs, tri))
+                        {
+                            outputTri = true;
+                        }
+                        else
+                        {
+                            PERF_COUNTER(visTileTrisCulledTileUVW, 1);
+                        }
+                    }
+                    else
+                    {
+                        PERF_COUNTER(visTileTrisCulledTileSetup, 1);
+                    }
                 }
                 else
                 {
                     PERF_COUNTER(visTileTrisCulledTileFrustum, 1);
                 }
-
-                // test for backfacing and intersection before ray origin
-
-                // test UVW overlap
 
                 uint appendMask = WaveActiveBallot(outputTri).x;
                 uint appendCount = countbits(appendMask);
@@ -210,7 +223,7 @@ void BeamsQuadVis(
 
                 if (outputTri)
                 {
-                    triCache[appendSlot].tri = tri;
+                    triCache[appendSlot].triTile = triTile;
                     triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
 
                     PERF_COUNTER(visTileTrisPass, 1);
@@ -225,24 +238,28 @@ void BeamsQuadVis(
         // process the surviving triangles in the cache
         for (uint cacheIndex = 0; cacheIndex < triCacheCount; cacheIndex++)
         {
-            Triangle tri = triCache[cacheIndex].tri;
+            TriTile triTile = triCache[cacheIndex].triTile;
             uint id = triCache[cacheIndex].id;
+
+            float3 rayOriginCenter;
+            float3 rayDirCenter;
+            GenerateCameraRay(
+                uint2(pixelDimX, pixelDimY),
+                float2(pixelX, pixelY),
+                rayOriginCenter, rayDirCenter);
+
+            float3 majorDirDiff;
+            float3 minorDirDiff;
+            GenerateCameraRayFootprint(
+                uint2(pixelDimX, pixelDimY),
+                majorDirDiff, minorDirDiff);
+
+            TriThread triThread = TriThreadSetup(triTile, rayDirCenter, majorDirDiff, minorDirDiff);
 
             for (uint s = 0; s < AA_SAMPLES; s++)
             {
-                float3 rayOrigin;
-                float3 rayDir;
-                GenerateCameraRay(
-                    uint2(pixelDimX, pixelDimY),
-                    float2(pixelX, pixelY) + AA_SAMPLE_OFFSET_TABLE[s],
-                    rayOrigin, rayDir);
-
-                float4 uvwt = triIntersect(rayOrigin, rayDir, tri);
-
-                if (uvwt.x >= 0 && uvwt.y >= 0 && uvwt.z >= 0 &&
-                    uvwt.w < nearestT[s])
+                if (TriThreadTest(triTile, triThread, AA_SAMPLE_OFFSET_TABLE[s], nearestT[s]))
                 {
-                    nearestT[s] = uvwt.w;
                     nearestID[s] = id;
                 }
             }

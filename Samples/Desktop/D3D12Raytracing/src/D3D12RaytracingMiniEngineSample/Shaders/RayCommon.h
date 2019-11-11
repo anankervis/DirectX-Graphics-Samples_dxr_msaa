@@ -68,6 +68,8 @@ struct Counters
     uint visTileLeaves;
     uint visTileTrisIn;
     uint visTileTrisCulledTileFrustum;
+    uint visTileTrisCulledTileSetup;
+    uint visTileTrisCulledTileUVW;
     uint visTileTrisPass;
     uint visShadeQuads;
 

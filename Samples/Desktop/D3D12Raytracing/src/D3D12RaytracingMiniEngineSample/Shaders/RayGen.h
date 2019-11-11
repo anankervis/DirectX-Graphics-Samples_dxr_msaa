@@ -53,15 +53,29 @@ void GenerateCameraRay(
 {
     origin = dynamicConstants.worldCameraPosition;
 
-    float2 xy = pixelPos + .5f;
-    float2 screenPos = xy / float2(pixelDim) * 2.0 - 1.0;
-
-    screenPos -= float2(dynamicConstants.jitterNormalizedX, dynamicConstants.jitterNormalizedY);
+    float2 scale = 2.0f / float2(pixelDim);
+    float2 bias = -float2(dynamicConstants.jitterNormalizedX, dynamicConstants.jitterNormalizedY) - 1.0f;
+    float2 screenPos = (pixelPos + .5f) * scale + bias; // pixel center
 
     // Invert Y for DirectX-style coordinates
     screenPos.y = -screenPos.y;
 
-    dir = mul((float3x3)dynamicConstants.cameraToWorld, float3(screenPos, -1));
+    float3x3 rotation = (float3x3)dynamicConstants.cameraToWorld;
+    dir = mul(rotation, float3(screenPos, -1));
+}
+
+// for a simple 2D grid projection with square pixels, there's not much to this
+void GenerateCameraRayFootprint(
+    uint2 pixelDim,
+    out float3 majorDirDiff,
+    out float3 minorDirDiff)
+{
+    float3 major = float3(-2.0f / pixelDim.x, 0, 0);
+    float3 minor = float3(0, -2.0f / pixelDim.y, 0); // flip Y for DX Y convention
+
+    float3x3 rotation = (float3x3)dynamicConstants.cameraToWorld;
+    majorDirDiff = mul(rotation, major);
+    minorDirDiff = mul(rotation, minor);
 }
 
 // note - outputs in the correct winding order for creating a Frustum
@@ -75,6 +89,7 @@ void GenerateTileRays(
 
     float2 scale = 2.0f / float2(tileDim);
     float2 bias = -float2(dynamicConstants.jitterNormalizedX, dynamicConstants.jitterNormalizedY) - 1.0f;
+    // Y delta is flipped due to DX Y convention, see below
     float2 screenPos00 = (tilePos + uint2(0, 1)) * scale + bias;
     float2 screenPos10 = (tilePos + uint2(1, 1)) * scale + bias;
     float2 screenPos11 = (tilePos + uint2(1, 0)) * scale + bias;
