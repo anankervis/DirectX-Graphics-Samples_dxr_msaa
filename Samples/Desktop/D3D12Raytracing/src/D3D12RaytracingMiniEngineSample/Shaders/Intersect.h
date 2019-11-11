@@ -134,6 +134,53 @@ bool FrustumTestUVW(float3 rayOrigin, float3 rayDirs[4], Triangle tri)
     return true; // all in
 }
 
+void FrustumTest_ConservativeT(
+    float3 rayOrigin, float3 rayDirs[4], Triangle tri,
+    out float conservativeMaxT,
+    out bool partialCoverage,
+    out bool fullCoverage)
+{
+    float4 uvw[4];
+    {for (int n = 0; n < 4; n++)
+    {
+        uvw[n] = triIntersectNoFail(rayOrigin, rayDirs[n], tri);
+    }}
+
+    float uMin = FLT_MAX;
+    float uMax = -FLT_MAX;
+    float vMin = FLT_MAX;
+    float vMax = -FLT_MAX;
+    float wMin = FLT_MAX;
+    float wMax = -FLT_MAX;
+    float tMax = -FLT_MAX;
+    {for (int n = 0; n < 4; n++)
+    {
+        uMin = min(uMin, uvw[n].x);
+        uMax = max(uMax, uvw[n].x);
+        vMin = min(vMin, uvw[n].y);
+        vMax = max(vMax, uvw[n].y);
+        wMin = min(wMin, uvw[n].z);
+        wMax = max(wMax, uvw[n].z);
+        tMax = max(tMax, uvw[n].w);
+    }}
+    conservativeMaxT = tMax;
+
+    partialCoverage = false;
+    fullCoverage = false;
+    if (uMax < 0 || uMin > 1 || vMax < 0 || vMin > 1 || wMax < 0 || wMin > 1)
+    {
+        // all out
+    }
+    else if (uMin < 0 || uMax > 1 || vMin < 0 || vMax > 1 || wMin < 0 || wMax > 1)
+    {
+        partialCoverage = true;
+    }
+    else
+    {
+        fullCoverage = true;
+    }
+}
+
 struct TriTile
 {
     float t;

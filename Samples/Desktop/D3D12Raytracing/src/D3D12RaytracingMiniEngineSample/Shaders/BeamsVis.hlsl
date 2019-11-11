@@ -117,27 +117,21 @@ void BeamsQuadVis(
 
     if (threadID == 0) PERF_COUNTER(visTiles, 1);
 
-    uint tileLeafCount = g_tileLeafCounts[tileIndex];
-    if (tileLeafCount <= 0)
+    uint tileTriCount = g_tileTriCounts[tileIndex];
+    if (tileTriCount <= 0)
     {
         // no leaves overlap this tile
-        if (threadID == 0) PERF_COUNTER(visTileNoLeaves, 1);
+        if (threadID == 0) PERF_COUNTER(visNoTris, 1);
         g_tileShadeQuadsCount[tileIndex] = 0;
         return;
     }
-    else if (tileLeafCount > TILE_MAX_LEAVES)
+    else if (tileTriCount > TILE_MAX_TRIS)
     {
-        // tile leaf list overflowed
-        if (threadID == 0) PERF_COUNTER(visTileOverflow, 1);
+        // tile tri list overflowed
+        if (threadID == 0) PERF_COUNTER(visOverflow, 1);
         g_tileShadeQuadsCount[tileIndex] = ~uint(0);
         return;
     }
-
-    // TODO: some of this work could probably be precomputed
-    float3 tileOrigin;
-    float3 tileDirs[4];
-    GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
-    Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
 
     if (threadID == 0)
     {
@@ -157,75 +151,50 @@ void BeamsQuadVis(
     }}
 
     // threads cooperate to fetch and coarse cull the triangles
-// TODO: one tri per thread, instead of one leaf per thread, once we get TRIS_PER_AABB > 1
-    uint fetchIterations = (tileLeafCount + TILE_SIZE - 1) / TILE_SIZE;
+    uint fetchIterations = (tileTriCount + TILE_SIZE - 1) / TILE_SIZE;
     for (uint f = 0; f < fetchIterations; f++)
     {
-        if (threadID == 0) PERF_COUNTER(visTileFetchIterations, 1);
+        if (threadID == 0) PERF_COUNTER(visFetchIterations, 1);
 
-        uint tileLeafIndex = f * TILE_SIZE + threadID;
+        uint tileTriIndex = f * TILE_SIZE + threadID;
 
-        if (tileLeafIndex < tileLeafCount)
+        if (tileTriIndex < tileTriCount)
         {
-            PERF_COUNTER(visTileLeaves, 1);
+            uint id = g_tileTris[tileIndex].id[tileTriIndex];
+            uint meshID = id >> PRIM_ID_BITS;
+            uint triID = id & PRIM_ID_MASK;
 
-            uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
-            uint meshID = aabbID >> PRIM_ID_BITS;
-            uint primID = aabbID & PRIM_ID_MASK;
+            bool outputTri = false;
+            TriTile triTile;
 
-            uint meshTriCount = g_meshInfo[meshID].triCount;
-            for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
+            PERF_COUNTER(visTrisIn, 1);
+            Triangle tri = triFetch(meshID, triID);
+
+            // test for backfacing and intersection before ray origin
+            float3 tileOrigin = dynamicConstants.worldCameraPosition;
+            if (TriTileSetup(tri, tileOrigin, triTile))
             {
-                bool outputTri = false;
-                TriTile triTile;
+                outputTri = true;
+            }
+            else
+            {
+                PERF_COUNTER(visTrisCulledTileSetup, 1);
+            }
 
-                if (triID < meshTriCount)
-                {
-                    PERF_COUNTER(visTileTrisIn, 1);
-                    Triangle tri = triFetch(meshID, triID);
+            uint appendMask = WaveActiveBallot(outputTri).x;
+            uint appendCount = countbits(appendMask);
+            uint appendSlotBase;
+            if (laneID == 0)
+                InterlockedAdd(triCacheCount, appendCount, appendSlotBase);
+            appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
+            uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
 
-                    // test the triangle against the tile frustum's planes
-                    if (FrustumTest(tileFrustum, tri))
-                    {
-                        // test for backfacing and intersection before ray origin
-                        if (TriTileSetup(tri, tileOrigin, triTile))
-                        {
-                            // test UVW interval overlap
-                            if (FrustumTestUVW(tileOrigin, tileDirs, tri))
-                            {
-                                outputTri = true;
-                            }
-                            else
-                            {
-                                PERF_COUNTER(visTileTrisCulledTileUVW, 1);
-                            }
-                        }
-                        else
-                        {
-                            PERF_COUNTER(visTileTrisCulledTileSetup, 1);
-                        }
-                    }
-                    else
-                    {
-                        PERF_COUNTER(visTileTrisCulledTileFrustum, 1);
-                    }
-                }
+            if (outputTri)
+            {
+                triCache[appendSlot].triTile = triTile;
+                triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
 
-                uint appendMask = WaveActiveBallot(outputTri).x;
-                uint appendCount = countbits(appendMask);
-                uint appendSlotBase;
-                if (laneID == 0)
-                    InterlockedAdd(triCacheCount, appendCount, appendSlotBase);
-                appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
-                uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
-
-                if (outputTri)
-                {
-                    triCache[appendSlot].triTile = triTile;
-                    triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
-
-                    PERF_COUNTER(visTileTrisPass, 1);
-                }
+                PERF_COUNTER(visTrisPass, 1);
             }
         }
 

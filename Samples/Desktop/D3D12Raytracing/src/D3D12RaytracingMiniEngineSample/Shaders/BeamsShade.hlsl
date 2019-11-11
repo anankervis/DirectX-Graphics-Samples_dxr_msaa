@@ -152,14 +152,14 @@ void BeamsQuadShade(
     if (quadCount == 0)
     {
         // no shade quads generated for this tile
-        if (threadID == 0) PERF_COUNTER(shadeTileNoQuads, 1);
+        if (threadID == 0) PERF_COUNTER(shadeNoQuads, 1);
         g_screenOutput[outputPos] = float4(0, 0, 1, 1);
         return;
     }
     else if (quadCount > MAX_SHADE_QUADS_PER_TILE)
     {
         // shade quad list overflowed
-        if (threadID == 0) PERF_COUNTER(shadeTileOverflow, 1);
+        if (threadID == 0) PERF_COUNTER(shadeOverflow, 1);
         g_screenOutput[outputPos] = float4(1, 0, 0, 1);
         return;
     }

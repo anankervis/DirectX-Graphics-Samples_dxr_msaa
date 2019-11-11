@@ -242,8 +242,8 @@ private:
 
     uint32_t m_tilesX;
     uint32_t m_tilesY;
-    StructuredBuffer m_tileLeafCounts;
-    StructuredBuffer m_tileLeaves;
+    StructuredBuffer m_tileTriCounts;
+    StructuredBuffer m_tileTris;
     StructuredBuffer m_tileShadeQuads;
     StructuredBuffer m_tileShadeQuadsCount;
     StructuredBuffer m_counters;
@@ -443,10 +443,10 @@ void DxrMsaaDemo::InitializeViews()
 
         UINT unused;
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
-        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileLeafCounts.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileTriCounts.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
-        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileLeaves.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileTris.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
         g_pRaytracingDescriptorHeap->AllocateDescriptor(uavHandle, unused);
         Graphics::g_Device->CopyDescriptorsSimple(1, uavHandle, m_tileShadeQuads.GetUAV(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1066,8 +1066,8 @@ m_Model.m_Header.meshCount -= 1;
         m_tilesY = g_SceneColorBuffer.GetHeight() / TILE_DIM_Y;
         uint32_t tileCount = m_tilesX * m_tilesY;
 
-        m_tileLeafCounts.Create(L"m_tileLeafCounts", tileCount, sizeof(uint), nullptr);
-        m_tileLeaves.Create(L"m_tileLeaves", tileCount, sizeof(TileTri), nullptr);
+        m_tileTriCounts.Create(L"m_tileTriCounts", tileCount, sizeof(uint), nullptr);
+        m_tileTris.Create(L"m_tileTris", tileCount, sizeof(TileTri), nullptr);
         m_tileShadeQuads.Create(L"m_tileShadeQuads", tileCount, sizeof(TileShadeQuads), nullptr);
         m_tileShadeQuadsCount.Create(L"m_tileShadeQuadsCount", tileCount, sizeof(uint32_t), nullptr);
         m_counters.Create(L"m_counters", 1, sizeof(Counters), nullptr);
@@ -1394,12 +1394,12 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     context.TransitionResource(g_dynamicConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(g_shadeConstantBuffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     context.TransitionResource(colorTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(m_tileLeafCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    context.TransitionResource(m_tileLeaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileTriCounts, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    context.TransitionResource(m_tileTris, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuads, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     context.TransitionResource(m_tileShadeQuadsCount, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    context.ClearUAV(m_tileLeafCounts);
+    context.ClearUAV(m_tileTriCounts);
 
     ID3D12GraphicsCommandList* pCommandList = context.GetCommandList();
     CComPtr<ID3D12GraphicsCommandList4> pRaytracingCommandList;
@@ -1425,8 +1425,8 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
 
 // TODO: beam tracing probably isn't fully utilizing the GPU, ideally we'd run these next two shaders in parallel with it
     // done with beam traversal, switch to post processing
-    context.InsertUAVBarrier(m_tileLeafCounts);
-    context.InsertUAVBarrier(m_tileLeaves);
+    context.InsertUAVBarrier(m_tileTriCounts);
+    context.InsertUAVBarrier(m_tileTris);
     context.FlushResourceBarriers();
 
     pRaytracingCommandList->SetComputeRootSignature(g_BeamPostRootSig.GetSignature());
@@ -1483,25 +1483,28 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
 
     PRINT_COUNTER(rayGenCount);
     PRINT_COUNTER(missCount);
-    PRINT_COUNTER(intersectCount);
     PRINT_COUNTER(anyHitCount);
     PRINT_COUNTER(closestHitCount);
 
+    PRINT_COUNTER(intersectCount);
+    PRINT_COUNTER(intersectTrisCulledTileFrustum);
+    PRINT_COUNTER(intersectTrisCulledTileSetup);
+    PRINT_COUNTER(intersectTrisCulledTileUVW);
+    PRINT_COUNTER(intersectTrisFullCoverage);
+    PRINT_COUNTER(intersectTrisPartialCoverage);
+
     PRINT_COUNTER(visTiles);
-    PRINT_COUNTER(visTileNoLeaves);
-    PRINT_COUNTER(visTileOverflow);
-    PRINT_COUNTER(visTileFetchIterations);
-    PRINT_COUNTER(visTileLeaves);
-    PRINT_COUNTER(visTileTrisIn);
-    PRINT_COUNTER(visTileTrisCulledTileFrustum);
-    PRINT_COUNTER(visTileTrisCulledTileSetup);
-    PRINT_COUNTER(visTileTrisCulledTileUVW);
-    PRINT_COUNTER(visTileTrisPass);
+    PRINT_COUNTER(visNoTris);
+    PRINT_COUNTER(visOverflow);
+    PRINT_COUNTER(visFetchIterations);
+    PRINT_COUNTER(visTrisIn);
+    PRINT_COUNTER(visTrisCulledTileSetup);
+    PRINT_COUNTER(visTrisPass);
     PRINT_COUNTER(visShadeQuads);
 
     PRINT_COUNTER(shadeTiles);
-    PRINT_COUNTER(shadeTileNoQuads);
-    PRINT_COUNTER(shadeTileOverflow);
+    PRINT_COUNTER(shadeNoQuads);
+    PRINT_COUNTER(shadeOverflow);
     PRINT_COUNTER(shadeQuads);
 
 # undef PRINT_COUNTER

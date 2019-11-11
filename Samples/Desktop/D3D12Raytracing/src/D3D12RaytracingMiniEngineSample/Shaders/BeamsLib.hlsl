@@ -1,9 +1,11 @@
 #define HLSL
 
+#include "Intersect.h"
 #include "RayCommon.h"
 #include "RayGen.h"
+#include "TriFetch.h"
 
-// Record the leaf node and move on. We'll compute coverage later.
+// Record the triangle and move on. We'll compute coverage later.
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {
@@ -13,15 +15,18 @@ void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
     uint tileY = DispatchRaysIndex().y;
     uint tileIndex = tileY * DispatchRaysDimensions().x + tileX;
 
-    uint leafSlot;
-    InterlockedAdd(g_tileLeafCounts[tileIndex], 1, leafSlot);
+    uint meshID = rootConstants.meshID;
+    uint triID = PrimitiveIndex();
 
-    if (leafSlot >= TILE_MAX_LEAVES)
+    uint triSlot;
+    InterlockedAdd(g_tileTriCounts[tileIndex], 1, triSlot);
+
+    if (triSlot >= TILE_MAX_TRIS)
         return;
 
-    uint id = (rootConstants.meshID << PRIM_ID_BITS) | PrimitiveIndex();
+    uint id = (meshID << PRIM_ID_BITS) | triID;
 
-    g_tileLeaves[tileIndex].id[leafSlot] = id;
+    g_tileTris[tileIndex].id[triSlot] = id;
 }
 
 [shader("intersection")]
@@ -33,7 +38,73 @@ void Intersection()
 
     BeamHitAttribs attr;
 
-    ReportHit(tHitAABB, 0, attr);
+    {
+        uint tileX = DispatchRaysIndex().x;
+        uint tileY = DispatchRaysIndex().y;
+
+        uint meshID = rootConstants.meshID;
+        uint primID = PrimitiveIndex();
+
+// TODO: this is only needed if TRIS_PER_AABB > 1
+        uint meshTriCount = g_meshInfo[meshID].triCount;
+
+        // TODO: some of this work could probably be precomputed
+        float3 tileOrigin;
+        float3 tileDirs[4];
+        GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
+        Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
+
+        bool outputLeaf = false;
+        for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
+        {
+            TriTile triTile;
+
+            if (triID < meshTriCount)
+            {
+                PERF_COUNTER(intersectTrisIn, 1);
+                Triangle tri = triFetch(meshID, triID);
+
+                // test the triangle against the tile frustum's planes
+                if (FrustumTest(tileFrustum, tri))
+                {
+                    // test for backfacing and intersection before ray origin
+                    if (TriTileSetup(tri, tileOrigin, triTile))
+                    {
+                        // test UVW interval overlap
+                        float conservativeMaxT;
+                        bool partialCoverage;
+                        bool fullCoverage;
+                        FrustumTest_ConservativeT(
+                            tileOrigin, tileDirs, tri,
+                            conservativeMaxT, partialCoverage, fullCoverage);
+
+                        if (fullCoverage)
+                        {
+                            ReportHit(conservativeMaxT, 0, attr);
+                            PERF_COUNTER(intersectTrisFullCoverage, 1);
+                        }
+                        else if (partialCoverage)
+                        {
+                            ReportHit(tHitAABB, 0, attr);
+                            PERF_COUNTER(intersectTrisPartialCoverage, 1);
+                        }
+                        else
+                        {
+                            PERF_COUNTER(intersectTrisCulledTileUVW, 1);
+                        }
+                    }
+                    else
+                    {
+                        PERF_COUNTER(intersectTrisCulledTileSetup, 1);
+                    }
+                }
+                else
+                {
+                    PERF_COUNTER(intersectTrisCulledTileFrustum, 1);
+                }
+            }
+        }
+    }
 }
 
 [shader("miss")]

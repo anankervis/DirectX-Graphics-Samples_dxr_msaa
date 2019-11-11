@@ -29,7 +29,6 @@
 #define TILE_DIM_Y (1 << TILE_DIM_LOG2_Y)
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
 #define TILE_MAX_TRIS 512 // adjust this according to max estimated tri density
-#define TILE_MAX_LEAVES (TILE_MAX_TRIS / TRIS_PER_AABB)
 
 #define WAVE_SIZE 32
 
@@ -59,25 +58,29 @@ struct Counters
 {
     uint rayGenCount;
     uint missCount;
-    uint intersectCount;
     uint anyHitCount;
     uint closestHitCount;
 
+    uint intersectCount;
+    uint intersectTrisIn;
+    uint intersectTrisCulledTileFrustum;
+    uint intersectTrisCulledTileSetup;
+    uint intersectTrisCulledTileUVW;
+    uint intersectTrisFullCoverage;
+    uint intersectTrisPartialCoverage;
+
     uint visTiles;
-    uint visTileNoLeaves;
-    uint visTileOverflow;
-    uint visTileFetchIterations;
-    uint visTileLeaves;
-    uint visTileTrisIn;
-    uint visTileTrisCulledTileFrustum;
-    uint visTileTrisCulledTileSetup;
-    uint visTileTrisCulledTileUVW;
-    uint visTileTrisPass;
+    uint visNoTris;
+    uint visOverflow;
+    uint visFetchIterations;
+    uint visTrisIn;
+    uint visTrisCulledTileSetup;
+    uint visTrisPass;
     uint visShadeQuads;
 
     uint shadeTiles;
-    uint shadeTileNoQuads;
-    uint shadeTileOverflow;
+    uint shadeNoQuads;
+    uint shadeOverflow;
     uint shadeQuads;
 };
 #if COLLECT_COUNTERS
@@ -88,7 +91,7 @@ struct Counters
 
 struct TileTri
 {
-    uint id[TILE_MAX_LEAVES]; // mesh + primitive IDs
+    uint id[TILE_MAX_TRIS]; // mesh + primitive IDs
 };
 
 struct ShadeQuad
@@ -169,8 +172,8 @@ Texture2D<float4> g_localNormal : register(t11);
 SamplerState      g_s0 : register(s0);
 
 RWTexture2D<float4> g_screenOutput : register(u2);
-RWStructuredBuffer<uint> g_tileLeafCounts : register(u3);
-RWStructuredBuffer<TileTri> g_tileLeaves : register(u4);
+RWStructuredBuffer<uint> g_tileTriCounts : register(u3);
+RWStructuredBuffer<TileTri> g_tileTris : register(u4);
 RWStructuredBuffer<TileShadeQuads> g_tileShadeQuads : register(u5);
 RWStructuredBuffer<uint> g_tileShadeQuadsCount : register(u6);
 RWStructuredBuffer<Counters> g_counters : register(u7);
