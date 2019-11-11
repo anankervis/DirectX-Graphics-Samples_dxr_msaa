@@ -142,6 +142,8 @@ void BeamsQuadShade(
     uint pixelDimX = dynamicConstants.tilesX * TILE_DIM_X;
     uint pixelDimY = dynamicConstants.tilesY * TILE_DIM_Y;
 
+    if (threadID == 0) PERF_COUNTER(shadeTiles, 1);
+
     uint2 outputPos = uint2(
         tileX * TILE_DIM_X + threadID % TILE_DIM_X,
         tileY * TILE_DIM_Y + threadID / TILE_DIM_X);
@@ -150,12 +152,14 @@ void BeamsQuadShade(
     if (quadCount == 0)
     {
         // no shade quads generated for this tile
+        if (threadID == 0) PERF_COUNTER(shadeTileNoQuads, 1);
         g_screenOutput[outputPos] = float4(0, 0, 1, 1);
         return;
     }
     else if (quadCount > MAX_SHADE_QUADS_PER_TILE)
     {
         // shade quad list overflowed
+        if (threadID == 0) PERF_COUNTER(shadeTileOverflow, 1);
         g_screenOutput[outputPos] = float4(1, 0, 0, 1);
         return;
     }
@@ -170,6 +174,8 @@ void BeamsQuadShade(
     uint inputSlot = threadID / QUAD_SIZE;
     while (inputSlot < quadCount)
     {
+        if (quadLocalIndex == 0) PERF_COUNTER(shadeQuads, 1);
+
         ShadeQuad shadeQuad = g_tileShadeQuads[tileIndex].quads[inputSlot];
         inputSlot += QUADS_PER_TILE;
 

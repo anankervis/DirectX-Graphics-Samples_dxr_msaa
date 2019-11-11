@@ -56,9 +56,24 @@
 struct Counters
 {
     uint rayGenCount;
-    uint intersectCount;
-    uint anyhitCount;
     uint missCount;
+    uint intersectCount;
+    uint anyHitCount;
+    uint closestHitCount;
+
+    uint visTiles;
+    uint visTileNoLeaves;
+    uint visTileOverflow;
+    uint visTileFetchIterations;
+    uint visTileLeaves;
+    uint visTileTrisIn;
+    uint visTileTrisPass;
+    uint visShadeQuads;
+
+    uint shadeTiles;
+    uint shadeTileNoQuads;
+    uint shadeTileOverflow;
+    uint shadeQuads;
 };
 #if COLLECT_COUNTERS
 # define PERF_COUNTER(counter, value) InterlockedAdd(g_counters[0]. counter, value)

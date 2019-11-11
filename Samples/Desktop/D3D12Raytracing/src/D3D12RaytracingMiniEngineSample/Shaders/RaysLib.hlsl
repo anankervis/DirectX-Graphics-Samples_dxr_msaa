@@ -27,6 +27,8 @@ cbuffer b0 : register(b0)
 [shader("closesthit")]
 void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
+    PERF_COUNTER(closestHitCount, 1);
+
     float3 rayDir = WorldRayDirection();
     uint meshID = rootConstants.meshID;
     uint primID = PrimitiveIndex();
@@ -92,12 +94,16 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 [shader("miss")]
 void Miss(inout RayPayload payload)
 {
+    PERF_COUNTER(missCount, 1);
+
     g_screenOutput[DispatchRaysIndex().xy] = float4(0, 0, 0, 1);
 }
 
 [shader("raygeneration")]
 void RayGen()
 {
+    PERF_COUNTER(rayGenCount, 1);
+
     RayPayload payload;
     payload.color = float3(0, 0, 0);
 

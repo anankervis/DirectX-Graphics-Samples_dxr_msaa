@@ -1478,10 +1478,30 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
 #if COLLECT_COUNTERS
     int countersReadIndex = (m_frameIndex + 1) % countersReadbackCount;
     const Counters *counters = (const Counters*)m_countersReadback[countersReadIndex].Map();
-    text.DrawFormattedString("RayGen: %u\n", counters->rayGenCount);
-    text.DrawFormattedString("Intersect: %u\n", counters->intersectCount);
-    text.DrawFormattedString("Anyhit: %u\n", counters->anyhitCount);
-    text.DrawFormattedString("Miss: %u\n", counters->missCount);
+
+# define PRINT_COUNTER(name) text.DrawFormattedString(#name ": %u\n", counters-> name);
+
+    PRINT_COUNTER(rayGenCount);
+    PRINT_COUNTER(missCount);
+    PRINT_COUNTER(intersectCount);
+    PRINT_COUNTER(anyHitCount);
+    PRINT_COUNTER(closestHitCount);
+
+    PRINT_COUNTER(visTiles);
+    PRINT_COUNTER(visTileNoLeaves);
+    PRINT_COUNTER(visTileOverflow);
+    PRINT_COUNTER(visTileFetchIterations);
+    PRINT_COUNTER(visTileLeaves);
+    PRINT_COUNTER(visTileTrisIn);
+    PRINT_COUNTER(visTileTrisPass);
+    PRINT_COUNTER(visShadeQuads);
+
+    PRINT_COUNTER(shadeTiles);
+    PRINT_COUNTER(shadeTileNoQuads);
+    PRINT_COUNTER(shadeTileOverflow);
+    PRINT_COUNTER(shadeQuads);
+# undef PRINT_COUNTER
+
     m_countersReadback[countersReadIndex].Unmap();
 #endif
 

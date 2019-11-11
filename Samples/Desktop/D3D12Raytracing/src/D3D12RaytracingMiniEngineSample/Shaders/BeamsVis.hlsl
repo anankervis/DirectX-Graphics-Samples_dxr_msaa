@@ -72,6 +72,8 @@ void EmitQuad(
 
     if (quadLocalIndex == 0)
     {
+        PERF_COUNTER(visShadeQuads, 1);
+
         uint outputSlot;
         InterlockedAdd(tileQuadCount, 1, outputSlot);
         if (outputSlot < MAX_SHADE_QUADS_PER_TILE)
@@ -113,16 +115,20 @@ void BeamsQuadVis(
     uint pixelDimX = dynamicConstants.tilesX * TILE_DIM_X;
     uint pixelDimY = dynamicConstants.tilesY * TILE_DIM_Y;
 
+    if (threadID == 0) PERF_COUNTER(visTiles, 1);
+
     uint tileLeafCount = g_tileLeafCounts[tileIndex];
     if (tileLeafCount <= 0)
     {
         // no leaves overlap this tile
+        if (threadID == 0) PERF_COUNTER(visTileNoLeaves, 1);
         g_tileShadeQuadsCount[tileIndex] = 0;
         return;
     }
     else if (tileLeafCount > TILE_MAX_LEAVES)
     {
         // tile leaf list overflowed
+        if (threadID == 0) PERF_COUNTER(visTileOverflow, 1);
         g_tileShadeQuadsCount[tileIndex] = ~uint(0);
         return;
     }
@@ -149,10 +155,14 @@ void BeamsQuadVis(
     uint fetchIterations = (tileLeafCount + TILE_SIZE - 1) / TILE_SIZE;
     for (uint f = 0; f < fetchIterations; f++)
     {
+        if (threadID == 0) PERF_COUNTER(visTileFetchIterations, 1);
+
         uint tileLeafIndex = f * TILE_SIZE + threadID;
 
         if (tileLeafIndex < tileLeafCount)
         {
+            PERF_COUNTER(visTileLeaves, 1);
+
             uint aabbID = g_tileLeaves[tileIndex].id[tileLeafIndex];
             uint meshID = aabbID >> PRIM_ID_BITS;
             uint primID = aabbID & PRIM_ID_MASK;
@@ -163,6 +173,8 @@ void BeamsQuadVis(
                 // TODO: remove this in favor of inserting a duplicate or degenerate triangle
                 if (triID >= meshTriCount)
                     break;
+
+                PERF_COUNTER(visTileTrisIn, 1);
 
                 Triangle tri = triFetch(meshID, triID);
 
@@ -182,6 +194,8 @@ void BeamsQuadVis(
 
                 triCache[appendSlot].tri = tri;
                 triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
+
+                PERF_COUNTER(visTileTrisPass, 1);
             }
         }
 

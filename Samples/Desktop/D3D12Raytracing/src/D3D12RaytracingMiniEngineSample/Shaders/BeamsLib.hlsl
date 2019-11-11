@@ -7,7 +7,7 @@
 [shader("anyhit")]
 void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 {
-    PERF_COUNTER(anyhitCount, 1);
+    PERF_COUNTER(anyHitCount, 1);
 
     uint tileX = DispatchRaysIndex().x;
     uint tileY = DispatchRaysIndex().y;
