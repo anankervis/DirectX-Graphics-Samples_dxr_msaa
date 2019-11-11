@@ -1493,6 +1493,7 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(visTileFetchIterations);
     PRINT_COUNTER(visTileLeaves);
     PRINT_COUNTER(visTileTrisIn);
+    PRINT_COUNTER(visTileTrisCulledTileFrustum);
     PRINT_COUNTER(visTileTrisPass);
     PRINT_COUNTER(visShadeQuads);
 
@@ -1500,6 +1501,7 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(shadeTileNoQuads);
     PRINT_COUNTER(shadeTileOverflow);
     PRINT_COUNTER(shadeQuads);
+
 # undef PRINT_COUNTER
 
     m_countersReadback[countersReadIndex].Unmap();

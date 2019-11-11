@@ -133,6 +133,12 @@ void BeamsQuadVis(
         return;
     }
 
+    // TODO: some of this work could probably be precomputed
+    float3 tileOrigin;
+    float3 tileDir[4];
+    GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDir);
+    Frustum tileFrustum = FrustumCreate(tileOrigin, tileDir);
+
     if (threadID == 0)
     {
         triCacheCount = 0;
@@ -178,13 +184,23 @@ void BeamsQuadVis(
 
                 Triangle tri = triFetch(meshID, triID);
 
+                bool outputTri = false;
+
                 // test the triangle against the tile frustum's planes
+                if (FrustumTest(tileFrustum, tri))
+                {
+                    outputTri = true;
+                }
+                else
+                {
+                    PERF_COUNTER(visTileTrisCulledTileFrustum, 1);
+                }
 
                 // test for backfacing and intersection before ray origin
 
                 // test UVW overlap
 
-                uint appendMask = WaveActiveBallot(true).x;
+                uint appendMask = WaveActiveBallot(outputTri).x;
                 uint appendCount = countbits(appendMask);
                 uint appendSlotBase;
                 if (laneID == 0)
@@ -192,10 +208,13 @@ void BeamsQuadVis(
                 appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
                 uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
 
-                triCache[appendSlot].tri = tri;
-                triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
+                if (outputTri)
+                {
+                    triCache[appendSlot].tri = tri;
+                    triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
 
-                PERF_COUNTER(visTileTrisPass, 1);
+                    PERF_COUNTER(visTileTrisPass, 1);
+                }
             }
         }
 

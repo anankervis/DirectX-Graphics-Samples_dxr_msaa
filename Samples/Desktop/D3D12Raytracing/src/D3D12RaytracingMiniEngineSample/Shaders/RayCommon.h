@@ -67,6 +67,7 @@ struct Counters
     uint visTileFetchIterations;
     uint visTileLeaves;
     uint visTileTrisIn;
+    uint visTileTrisCulledTileFrustum;
     uint visTileTrisPass;
     uint visShadeQuads;
 
