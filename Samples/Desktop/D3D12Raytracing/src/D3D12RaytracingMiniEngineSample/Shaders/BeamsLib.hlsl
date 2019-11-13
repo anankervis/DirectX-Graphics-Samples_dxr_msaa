@@ -52,6 +52,8 @@ void Intersection()
     GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
     Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
 
+    // TODO: for TRIS_PER_AABB > 1, it might be worth sorting the leaf node triangles here front to back,
+    // to enable some extra early rejects from conservative triangle tMin vs tile occluder tMax tracking.
     bool outputLeaf = false;
     for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
     {
