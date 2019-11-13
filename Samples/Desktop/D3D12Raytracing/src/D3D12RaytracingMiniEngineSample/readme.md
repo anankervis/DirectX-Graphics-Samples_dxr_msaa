@@ -6,15 +6,8 @@ Note, this sample has been modified to emulate conservative beam tracing queries
 
 It has been tested on an NVIDIA Titan RTX, driver 436.30. There are some assumptions in the shader code related to 32-wide SIMD, so it might not run properly on non-NVIDIA hardware.
 
-### Settings
-[Shaders/RayCommon.h](Shaders/RayCommon.h)
-* QUAD_READ_GROUPSHARED_FALLBACK - set to 1 (default) to use groupshared memory to communicate between quad thread, 0 to use SM6.0 intrinsics
-* EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT - set to 1 (default) to apply camera-dependent enlargement to beam tracing AABBs to simulate conservative beam queries via regular ray queries
-* COLLECT_COUNTERS - set to 1 (default) to collect and display performance counters
-* AA_SAMPLES_LOG2 - 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x AA (default). Must also update AA_SAMPLE_OFFSET_TABLE to match.
-* AA_SAMPLE_OFFSET_TABLE - sampleOffset1x, sampleOffset2x, sampleOffset4x, sampleOffset8x, sampleOffset16x (default)
-* TRIS_PER_AABB - how many triangles per leaf node? (default 1)
-* default tile dimensions are 8x4 = 32 threads, some assumptions exist in the shaders that tile thread count == 32 == HW wave size
+### New key bindings:
+* R - cycle render mode from 16x MSAA beams (default) to 1x raster to 16x SSAA rays
 
 ### Raster
 Renders the scene using traditional VS + PS + single-sampled rasterization.
@@ -24,7 +17,7 @@ Renders the scene using traditional VS + PS + single-sampled rasterization.
 Renders the scene using super-sampled ray tracing, like so:
 1. raygeneration shader:
    1. width * height threads
-   1. each thread creates AA_SAMPLES rays per thread
+   1. each thread creates AA_SAMPLES rays
 1. miss shader writes the clear color to the framebuffer
 1. closesthit shader:
    1. fetches triangle attributes
@@ -42,7 +35,8 @@ Renders the scene using conservative beam tracing and software MSAA, like so:
    1. D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION
 1. raygeneration shader: [Shaders/BeamsLib.hlsl](Shaders/BeamsLib.hlsl)
    1. width / TILE_DIM_X * height / TILE_DIM_Y threads
-   1. each thread represents a beam (an 8x4 pixel screen tile)
+   1. each ray represents a beam (an 8x4 pixel screen tile)
+   1. one beam (ray) per thread
    1. AABBs are enlarged in a camera-dependent fashion so that a center ray will be guaranteed to hit all geometry that would have intersected the beam volume
 1. miss shader is a no-op
 1. intersection shader: [Shaders/BeamsLib.hlsl](Shaders/BeamsLib.hlsl)
@@ -56,7 +50,7 @@ Renders the scene using conservative beam tracing and software MSAA, like so:
    1. if the triangle's tile tMin is conservatively further away than the current search tMax, cull the triangle
    1. if the tile is fully inside the triangle, update the search tMax
       1. tMax = min(tMax, triangleConservativeTMax)
-      1. (this triangle is an occluder for this tile)
+      1. (this triangle becomes an occluder for this tile)
    1. if the tile has full or partial overlap with the triangle, call ReportHit(current search tMax) to invoke the anyhit shader
 1. anyhit shader: [Shaders/BeamsLib.hlsl](Shaders/BeamsLib.hlsl)
    1. appends the triangle ID to a per-tile triangle list
@@ -89,7 +83,7 @@ Renders the scene using conservative beam tracing and software MSAA, like so:
       1. threadgroup size = TILE_SIZE
       1. one tile (beam) per threadgroup
       1. threads are swizzled such that every 4 consecutive threads are a 2x2 screen quad
-      1. thread mapping to pixel location is dynamic, depending on which shade quad work item the thread is consuming
+      1. thread mapping to pixel location is dynamic (within the bounds of a single tile), depending on which shade quad work item the thread is consuming
    1. each set of 4 threads pulls one shade quad off the per-tile list
    1. each thread shades at the pixel center
       1. centroid sampling is possible, but would require additional information to be stored in the shade quad data structure
@@ -99,17 +93,26 @@ Renders the scene using conservative beam tracing and software MSAA, like so:
 
 Beam volume queries and MSAA are somewhat independent of each other.
 
-Beam volume queries are a modification to the behavior of traversal and intersection/anyhit. They can be conservative (the full beam extents, for scene queries) or not (beam extents are inset to contain only the enabled subsamples), though this is a software detail that should be left up to the app's raygeneration shader. The closesthit shader and a final intersection T value are less directly useful than they are with traditional ray tracing.
+Beam volume queries are a modification to the behavior of traversal and intersection/anyhit. They can be conservative (the full beam extents, for scene queries) or not (beam extents are inset to contain only the enabled subsamples), though this is a software detail that should be left up to the app's raygeneration shader. The closesthit shader and a final intersection T value are less directly useful (if at all) than they are with traditional ray tracing.
 
-Both require adding a concept of ray footprint (extents). For beams, to define the beam volume, in addition to the existing origin + central direction you get from ray tracing. For MSAA, to convert the location of 2D normalized subsample offsets to 3D space. In this demo, the extents are implicit thanks to us rendering a simple, projected 2D grid of pixels. In more complicated examples (VR distortion correction, foveated rendering), the extents would need to be explicit.
+Both require adding a concept of ray footprint (extents). For beams, to define the beam volume, in addition to the existing origin + central direction you get from ray tracing. For MSAA, to convert the location of 2D normalized subsample offsets to 3D space. In this demo, the extents are implicit thanks to us rendering a simple, projected 2D grid of pixels. In more complicated examples (VR distortion correction, foveated rendering, motion blur), the extents would need to be explicit.
 
 It's likely best to leave MSAA as a software concept, with the support of beam queries to gather geometry intersecting the footprint. This way the developer can implement MSAA, or more creative uses (irregular foveated rendering patterns, decoupling of visibility and shading rate, etc.).
 
-### New key bindings:
-* R - cycle render mode from 16x MSAA beams (default) to 1x raster to 16x SSAA rays
+Most of our use cases are fine with (and optimized for) a single point origin (pinhole camera). Depth of field is a notable exception. In HVVR, we treat DoF screen tiles as 4-sided beam frusta (the same as pinhole tiles), fit to the hourglass shape of the DoF ray packets. The primary difference is not in traversal, but in converting the per-tile triangle lists to per-pixel / per-sample visibility (there are fewer possible optimizations).
 
 ### Limitations:
 The camera viewpoint is locked at the initial position. This is because the AABBs in beam tracing mode are expanded in a camera-dependent fashion as part of beam emulation.
+
+### Settings
+[Shaders/RayCommon.h](Shaders/RayCommon.h)
+* QUAD_READ_GROUPSHARED_FALLBACK - set to 1 (default) to use groupshared memory to communicate between quad threads, 0 to use SM6.0 intrinsics
+* EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT - set to 1 (default) to apply camera-dependent enlargement to beam tracing AABBs to simulate conservative beam queries via regular ray queries
+* COLLECT_COUNTERS - set to 1 (default) to collect and display performance counters
+* AA_SAMPLES_LOG2 - 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x AA (default). Must also update AA_SAMPLE_OFFSET_TABLE to match.
+* AA_SAMPLE_OFFSET_TABLE - sampleOffset1x, sampleOffset2x, sampleOffset4x, sampleOffset8x, sampleOffset16x (default)
+* TRIS_PER_AABB - how many triangles per leaf node? (default 1)
+* default tile dimensions are 8x4 = 32 threads, some assumptions exist in the shaders that tile thread count == 32 == HW wave size
 
 ## Controls:
 * forward/backward/strafe - left thumbstick or WASD (FPS controls).
