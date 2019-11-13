@@ -59,7 +59,6 @@ using namespace GameCore;
 using namespace Math;
 using namespace Graphics;
 
-BoolVar enableMsaa("Application/Raytracing/enableMsaa", true);
 BoolVar freezeCamera("Application/Raytracing/freezeCamera", false);
 namespace EngineProfiling
 {
@@ -114,6 +113,12 @@ const char* renderModeStr[] =
     "Beams",
 };
 EnumVar renderMode("Application/Raytracing/RenderMode", int(RenderMode::beams), int(RenderMode::count), renderModeStr);
+const char* renderModeAAStr[] =
+{
+    "",
+    "SSAA",
+    "MSAA",
+};
 
 const static UINT MaxRayRecursion = 1;
 
@@ -1160,9 +1165,7 @@ void DxrMsaaDemo::Update( float deltaT )
 
     if (GameInput::IsFirstPressed(GameInput::kKey_r))
         renderMode = (renderMode + 1) % int(RenderMode::count);
-    if (GameInput::IsFirstPressed(GameInput::kKey_m))
-        enableMsaa = !enableMsaa;
-    
+
     if (GameInput::IsFirstPressed(GameInput::kKey_f))
     {
         freezeCamera = !freezeCamera;
@@ -1477,7 +1480,11 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     text.SetLeftMargin(1000);
 
     text.DrawFormattedString("Million Primary Rays/s: %7.3f\n", primaryRaysPerSec);
-    text.DrawFormattedString("RenderMode: %s MSAA: %s\n", renderModeStr[renderMode], enableMsaa ? "Y" : "N");
+    text.DrawFormattedString("RenderMode: %s %dx %s\n"
+        , renderModeStr[renderMode]
+        , renderMode == int(RenderMode::raster) ? 1 : AA_SAMPLES
+        , renderModeAAStr[renderMode]
+    );
 
 #if COLLECT_COUNTERS
     int countersReadIndex = (m_frameIndex + 1) % countersReadbackCount;
