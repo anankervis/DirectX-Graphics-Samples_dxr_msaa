@@ -102,7 +102,9 @@ It's likely best to leave MSAA as a software concept, with the support of beam q
 Most of our use cases are fine with (and optimized for) a single point origin (pinhole camera). Depth of field is a notable exception. In HVVR, we treat DoF screen tiles as 4-sided beam frusta (the same as pinhole tiles), fit to the hourglass shape of the DoF ray packets. The primary difference is not in traversal, but in converting the per-tile triangle lists to per-pixel / per-sample visibility (there are fewer possible optimizations).
 
 ### Limitations:
-The camera viewpoint is locked at the initial position. This is because the AABBs in beam tracing mode are expanded in a camera-dependent fashion as part of beam emulation.
+* The camera viewpoint is locked at the initial position. This is because the AABBs in beam tracing mode are expanded in a camera-dependent fashion as part of beam emulation.
+* No centroid sampling
+* Color banding in the darks, due to using a low-precision (10-bit linear) accumulation intermediate for the Beams mode
 
 ### Settings
 [Shaders/RayCommon.h](Shaders/RayCommon.h)
