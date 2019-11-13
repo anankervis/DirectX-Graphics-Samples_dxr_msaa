@@ -78,7 +78,11 @@ void GenerateCameraRayFootprint(
     minorDirDiff = mul(rotation, minor);
 }
 
-// note - outputs in the correct winding order for creating a Frustum
+// TODO: if not requesting a fully conservative beam query, these corner rays should be inset
+// to the bounding box of the actual samples... in the case of 1x (no AA), they would be
+// inset to the pixel centers of the outer corner pixels of the beam tile. This will give a tighter
+// fit and allow fewer triangles through.
+// Note: outputs in the correct winding order for creating a Frustum
 void GenerateTileRays(
     uint2 tileDim,
     uint2 tilePos,

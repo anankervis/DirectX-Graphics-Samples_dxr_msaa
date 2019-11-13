@@ -19,7 +19,7 @@ struct ShadePixel
 #define SORT_CMP_LESS(a, b) (a < b)
 #include "Sort.h"
 
-#define TRI_CACHE_SIZE WAVE_SIZE
+#define TRI_CACHE_SIZE TILE_SIZE
 
 struct TriCacheEntry
 {
@@ -27,7 +27,6 @@ struct TriCacheEntry
     uint id;
 };
 groupshared TriCacheEntry triCache[TRI_CACHE_SIZE];
-groupshared uint triCacheCount;
 
 groupshared uint tileQuadCount;
 
@@ -132,10 +131,7 @@ void BeamsQuadVis(
     }
 
     if (threadID == 0)
-    {
-        triCacheCount = 0;
         tileQuadCount = 0;
-    }
     GroupMemoryBarrierWithGroupSync();
 
     float nearestT[AA_SAMPLES];
@@ -148,13 +144,15 @@ void BeamsQuadVis(
         nearestID[s] = BAD_TRI_ID;
     }}
 
-    // threads cooperate to fetch and coarse cull the triangles
-    uint fetchIterations = (tileTriCount + TILE_SIZE - 1) / TILE_SIZE;
+    // threads cooperate to fetch and setup the triangles
+    // Note: this code assumes TRI_CACHE_SIZE == TILE_SIZE
+    uint fetchIterations = (tileTriCount + TRI_CACHE_SIZE - 1) / TRI_CACHE_SIZE;
     for (uint f = 0; f < fetchIterations; f++)
     {
         if (threadID == 0) PERF_COUNTER(visFetchIterations, 1);
 
-        uint tileTriIndex = f * TILE_SIZE + threadID;
+        uint tileTriIndexBase = f * TRI_CACHE_SIZE;
+        uint tileTriIndex = tileTriIndexBase + threadID;
 
         if (tileTriIndex < tileTriCount)
         {
@@ -162,42 +160,25 @@ void BeamsQuadVis(
             uint meshID = id >> PRIM_ID_BITS;
             uint triID = id & PRIM_ID_MASK;
 
-            bool outputTri = false;
-            TriTile triTile;
-
             PERF_COUNTER(visTrisIn, 1);
             Triangle tri = triFetch(meshID, triID);
 
-            // test for backfacing and intersection before ray origin
+            // We've already performed conservative (coarse) beam tile vs triangle rejects
+            // in the intersection shader, so we don't need to repeat them here. Just precompute
+            // parameters for per-sample visibility testing.
             float3 tileOrigin = dynamicConstants.worldCameraPosition;
-            if (TriTileSetup(tri, tileOrigin, triTile))
-            {
-                outputTri = true;
-            }
-            else
-            {
-                PERF_COUNTER(visTrisCulledTileSetup, 1);
-            }
+            TriTile triTile;
+            TriTileSetup(tri, tileOrigin, triTile);
 
-            uint appendMask = WaveActiveBallot(outputTri).x;
-            uint appendCount = countbits(appendMask);
-            uint appendSlotBase;
-            if (laneID == 0)
-                InterlockedAdd(triCacheCount, appendCount, appendSlotBase);
-            appendSlotBase = WaveReadLaneAt(appendSlotBase, 0);
-            uint appendSlot = appendSlotBase + countbits(appendMask & laneMaskLT);
+            // Because we performed all our culling in the intersection shader, there's no need for
+            // a prefix sum or compaction across the lanes.
+            uint appendSlot = threadID;
 
-            if (outputTri)
-            {
-                triCache[appendSlot].triTile = triTile;
-                triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
-
-                PERF_COUNTER(visTrisPass, 1);
-            }
+            triCache[appendSlot].triTile = triTile;
+            triCache[appendSlot].id = (meshID << PRIM_ID_BITS) | triID;
         }
 
-// TODO: at this point, we could check for tri cache capacity and use a "continue" statement to keep accumulating
-
+        uint triCacheCount = min(TRI_CACHE_SIZE, tileTriCount - tileTriIndexBase);
         GroupMemoryBarrierWithGroupSync();
 
         // process the surviving triangles in the cache
@@ -229,10 +210,6 @@ void BeamsQuadVis(
                 }
             }
         }
-
-        // reset the cache
-        if (threadID == 0)
-            triCacheCount = 0;
         GroupMemoryBarrierWithGroupSync();
     }
 

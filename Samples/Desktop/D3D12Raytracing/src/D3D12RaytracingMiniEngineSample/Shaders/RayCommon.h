@@ -30,6 +30,8 @@
 #define TILE_SIZE (TILE_DIM_X * TILE_DIM_Y)
 #define TILE_MAX_TRIS 512 // adjust this according to max estimated tri density
 
+// There are a couple places where TILE_SIZE is assumed to be equal to WAVE_SIZE,
+// and WAVE_SIZE is assumed to be <= 32.
 #define WAVE_SIZE 32
 
 #define QUAD_DIM_LOG2_X 1
@@ -75,8 +77,6 @@ struct Counters
     uint visOverflow;
     uint visFetchIterations;
     uint visTrisIn;
-    uint visTrisCulledTileSetup;
-    uint visTrisPass;
     uint visShadeQuads;
 
     uint shadeTiles;

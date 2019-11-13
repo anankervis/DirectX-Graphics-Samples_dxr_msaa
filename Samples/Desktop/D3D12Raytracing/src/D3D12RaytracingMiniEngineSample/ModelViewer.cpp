@@ -778,6 +778,10 @@ void DxrMsaaDemo::createAABBs()
     float camFoV = m_Camera.GetFOV();
     float camAspect = float(g_SceneColorBuffer.GetWidth()) / g_SceneColorBuffer.GetHeight();
 
+    // TODO: if not requesting a fully conservative beam query, the tile size should be inset
+    // to the bounding box of the actual samples... in the case of 1x (no AA), it would be
+    // inset to the pixel centers of the outer corner pixels of the beam tile. This will give a tighter
+    // fit and allow fewer triangles through.
     float tileSizeXAt1 = tanf(camFoV * .5f) * camAspect / m_tilesX;
     float tileSizeYAt1 = tanf(camFoV * .5f) / m_tilesY;
 #endif
@@ -1499,8 +1503,6 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(visOverflow);
     PRINT_COUNTER(visFetchIterations);
     PRINT_COUNTER(visTrisIn);
-    PRINT_COUNTER(visTrisCulledTileSetup);
-    PRINT_COUNTER(visTrisPass);
     PRINT_COUNTER(visShadeQuads);
 
     PRINT_COUNTER(shadeTiles);

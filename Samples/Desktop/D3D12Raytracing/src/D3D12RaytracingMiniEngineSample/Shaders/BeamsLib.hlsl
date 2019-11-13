@@ -80,6 +80,7 @@ void Intersection()
                         triConservativeTMin, triConservativeTMax,
                         partialCoverage, fullCoverage);
 
+                    // test whether the triangle is fully occluded by tMax, within the bounds of the beam
                     if (triConservativeTMin < tMax)
                     {
                         // If this triangle fully overlaps the beam, update tMax with the furthest T value of the

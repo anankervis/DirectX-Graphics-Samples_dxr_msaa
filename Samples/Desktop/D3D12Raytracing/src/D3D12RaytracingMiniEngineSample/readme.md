@@ -1,5 +1,11 @@
-# D3D12 Raytracing MiniEngine Sample
+# D3D12 Raytracing MiniEngine Sample (Modified for beam tracing + MSAA)
 ![MiniEngine Screenshot](Screenshot.png)
+
+## Beam Tracing + MSAA
+Note, this has sample has been modified to emulate conservative beam tracing queries, as well as demonstrate software MSAA via compute shaders.
+
+It has been tested on an NVIDIA Titan RTX, driver 436.30.
+
 ## Raytracing Modifications
 
 This is a modified version of MiniEngine that uses the DirectX Raytracing for a series of effects.
