@@ -29,6 +29,8 @@ struct ShadePixel
 #define SORT_CMP_LESS(a, b) (a < b)
 #include "Sort.h"
 
+// Enable this to pack colors down into a uint, makes it easier to do atomic framebuffer updates
+// when multiple threads could be shading quads that target the same pixel location.
 #define PACKED_TILE_FB 1
 
 #if PACKED_TILE_FB
