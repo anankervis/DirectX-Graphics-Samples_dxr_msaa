@@ -134,9 +134,12 @@ bool FrustumTestUVW(float3 rayOrigin, float3 rayDirs[4], Triangle tri)
     return true; // all in
 }
 
+// Same idea as FrustumTestUVW, except that we also report back the min/max T values out of the
+// four corners, as well as distinguishing between full/partial overlap.
 void FrustumTest_ConservativeT(
     float3 rayOrigin, float3 rayDirs[4], Triangle tri,
-    out float conservativeMaxT,
+    out float conservativeTMin,
+    out float conservativeTMax,
     out bool partialCoverage,
     out bool fullCoverage)
 {
@@ -152,6 +155,7 @@ void FrustumTest_ConservativeT(
     float vMax = -FLT_MAX;
     float wMin = FLT_MAX;
     float wMax = -FLT_MAX;
+    float tMin = FLT_MAX;
     float tMax = -FLT_MAX;
     {for (int n = 0; n < 4; n++)
     {
@@ -161,9 +165,11 @@ void FrustumTest_ConservativeT(
         vMax = max(vMax, uvw[n].y);
         wMin = min(wMin, uvw[n].z);
         wMax = max(wMax, uvw[n].z);
+        tMin = min(tMin, uvw[n].w);
         tMax = max(tMax, uvw[n].w);
     }}
-    conservativeMaxT = tMax;
+    conservativeTMin = tMin;
+    conservativeTMax = tMax;
 
     partialCoverage = false;
     fullCoverage = false;

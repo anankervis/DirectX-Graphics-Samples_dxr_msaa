@@ -1489,6 +1489,7 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(intersectCount);
     PRINT_COUNTER(intersectTrisCulledTileFrustum);
     PRINT_COUNTER(intersectTrisCulledTileSetup);
+    PRINT_COUNTER(intersectTrisCulledTileConservativeT);
     PRINT_COUNTER(intersectTrisCulledTileUVW);
     PRINT_COUNTER(intersectTrisFullCoverage);
     PRINT_COUNTER(intersectTrisPartialCoverage);

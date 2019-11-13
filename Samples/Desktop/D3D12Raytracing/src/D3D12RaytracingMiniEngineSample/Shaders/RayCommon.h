@@ -65,6 +65,7 @@ struct Counters
     uint intersectTrisIn;
     uint intersectTrisCulledTileFrustum;
     uint intersectTrisCulledTileSetup;
+    uint intersectTrisCulledTileConservativeT;
     uint intersectTrisCulledTileUVW;
     uint intersectTrisFullCoverage;
     uint intersectTrisPartialCoverage;
@@ -150,7 +151,7 @@ struct BeamPayload
 };
 struct BeamHitAttribs
 {
-    uint pad;
+    uint triID;
 };
 
 #ifdef HLSL

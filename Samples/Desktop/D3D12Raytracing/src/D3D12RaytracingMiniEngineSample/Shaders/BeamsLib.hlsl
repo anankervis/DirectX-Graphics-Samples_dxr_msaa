@@ -16,7 +16,7 @@ void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
     uint tileIndex = tileY * DispatchRaysDimensions().x + tileX;
 
     uint meshID = rootConstants.meshID;
-    uint triID = PrimitiveIndex();
+    uint triID = attr.triID;
 
     uint triSlot;
     InterlockedAdd(g_tileTriCounts[tileIndex], 1, triSlot);
@@ -34,77 +34,88 @@ void Intersection()
 {
     PERF_COUNTER(intersectCount, 1);
 
-    float tHitAABB = RayTCurrent();
+    float tMax = RayTCurrent();
 
-    BeamHitAttribs attr;
+    uint tileX = DispatchRaysIndex().x;
+    uint tileY = DispatchRaysIndex().y;
 
+    uint meshID = rootConstants.meshID;
+    uint primID = PrimitiveIndex();
+
+#if TRIS_PER_AABB > 1
+    uint meshTriCount = g_meshInfo[meshID].triCount;
+#endif
+
+    // TODO: some of this could probably be precomputed
+    float3 tileOrigin;
+    float3 tileDirs[4];
+    GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
+    Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
+
+    bool outputLeaf = false;
+    for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
     {
-        uint tileX = DispatchRaysIndex().x;
-        uint tileY = DispatchRaysIndex().y;
-
-        uint meshID = rootConstants.meshID;
-        uint primID = PrimitiveIndex();
+        TriTile triTile;
 
 #if TRIS_PER_AABB > 1
-        uint meshTriCount = g_meshInfo[meshID].triCount;
+        if (triID < meshTriCount)
 #endif
-
-        // TODO: some of this could probably be precomputed
-        float3 tileOrigin;
-        float3 tileDirs[4];
-        GenerateTileRays(uint2(dynamicConstants.tilesX, dynamicConstants.tilesY), uint2(tileX, tileY), tileOrigin, tileDirs);
-        Frustum tileFrustum = FrustumCreate(tileOrigin, tileDirs);
-
-        bool outputLeaf = false;
-        for (uint triID = primID * TRIS_PER_AABB; triID < (primID + 1) * TRIS_PER_AABB; triID++)
         {
-            TriTile triTile;
+            PERF_COUNTER(intersectTrisIn, 1);
+            Triangle tri = triFetch(meshID, triID);
 
-#if TRIS_PER_AABB > 1
-            if (triID < meshTriCount)
-#endif
+            // test the triangle against the tile frustum's planes
+            if (FrustumTest(tileFrustum, tri))
             {
-                PERF_COUNTER(intersectTrisIn, 1);
-                Triangle tri = triFetch(meshID, triID);
-
-                // test the triangle against the tile frustum's planes
-                if (FrustumTest(tileFrustum, tri))
+                // test for backfacing and intersection before ray origin
+                if (TriTileSetup(tri, tileOrigin, triTile))
                 {
-                    // test for backfacing and intersection before ray origin
-                    if (TriTileSetup(tri, tileOrigin, triTile))
+                    // test UVW interval overlap
+                    float triConservativeTMin;
+                    float triConservativeTMax;
+                    bool partialCoverage;
+                    bool fullCoverage;
+                    FrustumTest_ConservativeT(
+                        tileOrigin, tileDirs, tri,
+                        triConservativeTMin, triConservativeTMax,
+                        partialCoverage, fullCoverage);
+
+                    if (triConservativeTMin < tMax)
                     {
-                        // test UVW interval overlap
-                        float conservativeMaxT;
-                        bool partialCoverage;
-                        bool fullCoverage;
-                        FrustumTest_ConservativeT(
-                            tileOrigin, tileDirs, tri,
-                            conservativeMaxT, partialCoverage, fullCoverage);
+                        // If this triangle fully overlaps the beam, update tMax with the furthest T value of the
+                        // triangle within the beam extents.
+                        // Otherwise, we leave tMax alone, because we can't guarantee that the triangle occludes
+                        // subsequent triangles in the search.
+                        if (fullCoverage)
+                            tMax = min(tMax, triConservativeTMax);
+
+                        if (fullCoverage || partialCoverage)
+                        {
+                            BeamHitAttribs attr;
+                            attr.triID = triID;
+                            ReportHit(tMax, 0, attr);
+                        }
 
                         if (fullCoverage)
-                        {
-                            ReportHit(conservativeMaxT, 0, attr);
                             PERF_COUNTER(intersectTrisFullCoverage, 1);
-                        }
                         else if (partialCoverage)
-                        {
-                            ReportHit(tHitAABB, 0, attr);
                             PERF_COUNTER(intersectTrisPartialCoverage, 1);
-                        }
                         else
-                        {
                             PERF_COUNTER(intersectTrisCulledTileUVW, 1);
-                        }
                     }
                     else
                     {
-                        PERF_COUNTER(intersectTrisCulledTileSetup, 1);
+                        PERF_COUNTER(intersectTrisCulledTileConservativeT, 1);
                     }
                 }
                 else
                 {
-                    PERF_COUNTER(intersectTrisCulledTileFrustum, 1);
+                    PERF_COUNTER(intersectTrisCulledTileSetup, 1);
                 }
+            }
+            else
+            {
+                PERF_COUNTER(intersectTrisCulledTileFrustum, 1);
             }
         }
     }
