@@ -135,7 +135,7 @@ void BeamsQuadVis(
     GroupMemoryBarrierWithGroupSync();
 
     float nearestT[AA_SAMPLES];
-// TODO: nearestID can be moved to groupshared to reduce register pressure
+// TODO: nearestID can be moved to groupshared to reduce register pressure at higher sample counts
 // (but should be moved back to registers for the sort)
     uint nearestID[AA_SAMPLES];
     {for (uint s = 0; s < AA_SAMPLES; s++)
@@ -216,7 +216,6 @@ void BeamsQuadVis(
     // Beware packing bits into the sort key and/or sign-extending it on unpack like HVVR does...
     // HLSL likes to silently convert uint to int (for example, the min intrinsic).
     sortBitonic(nearestID);
-// TODO: move sort result into groupshared for indexing code gen?
 
     uint matchID = BAD_TRI_ID;
     uint localS = 0;
@@ -228,7 +227,11 @@ void BeamsQuadVis(
 
         uint localID = BAD_TRI_ID;
         if (!localDone)
+        {
+            // I haven't seen the disassembly, but somehow this dynamic register indexing is not
+            // a disaster. If it ever becomes a problem, nearestID could be moved to groupshared.
             localID = nearestID[localS];
+        }
 
 #if QUAD_READ_GROUPSHARED_FALLBACK
         // groupshared fallback
