@@ -104,7 +104,7 @@ Most of our use cases are fine with (and optimized for) a single point origin (p
 ### Limitations:
 * The camera viewpoint is locked at the initial position. This is because the AABBs in beam tracing mode are expanded in a camera-dependent fashion as part of beam emulation.
 * No centroid sampling
-* Color banding in the darks, due to using a low-precision (10-bit linear) accumulation intermediate for the Beams mode
+* Color banding in the darks, due to using a low-precision linear accumulation intermediate for the Beams mode
 
 ### Settings
 [Shaders/RayCommon.h](Shaders/RayCommon.h)
