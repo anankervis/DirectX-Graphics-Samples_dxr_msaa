@@ -115,7 +115,7 @@ const char* renderModeStr[] =
 EnumVar renderMode("Application/Raytracing/RenderMode", int(RenderMode::beams), int(RenderMode::count), renderModeStr);
 const char* renderModeAAStr[] =
 {
-    "",
+    "MSAA",
     "SSAA",
     "MSAA",
 };
@@ -1011,10 +1011,10 @@ void DxrMsaaDemo::Startup()
     g_SceneDepthBufferMsaa.Create(
         L"g_SceneDepthBufferMsaa",
         g_SceneDepthBuffer.GetWidth(), g_SceneDepthBuffer.GetHeight(),
-        AA_SAMPLES,
+        AA_SAMPLES_RASTER,
         g_SceneDepthBuffer.GetFormat());
 
-    g_SceneColorBufferMsaa.SetMsaaMode(AA_SAMPLES, AA_SAMPLES);
+    g_SceneColorBufferMsaa.SetMsaaMode(AA_SAMPLES_RASTER, AA_SAMPLES_RASTER);
     g_SceneColorBufferMsaa.Create(
         L"g_SceneColorBufferMsaa",
         g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight(),
@@ -1057,7 +1057,7 @@ void DxrMsaaDemo::Startup()
     m_ModelPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     m_ModelPSO.SetBlendState(BlendDisable);
     m_ModelPSO.SetDepthStencilState(DepthStateReadWrite);
-    m_ModelPSO.SetRenderTargetFormats(_countof(formats), formats, g_SceneDepthBuffer.GetFormat(), AA_SAMPLES);
+    m_ModelPSO.SetRenderTargetFormats(_countof(formats), formats, g_SceneDepthBuffer.GetFormat(), AA_SAMPLES_RASTER);
     m_ModelPSO.SetVertexShader( g_pModelViewerVS, sizeof(g_pModelViewerVS) );
     m_ModelPSO.SetPixelShader( g_pModelViewerPS, sizeof(g_pModelViewerPS) );
     m_ModelPSO.Finalize();
@@ -1504,7 +1504,7 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     text.DrawFormattedString("Million Primary Rays/s: %7.3f\n", primaryRaysPerSec);
     text.DrawFormattedString("RenderMode: %s %dx %s\n"
         , renderModeStr[renderMode]
-        , AA_SAMPLES
+        , renderMode == int(RenderMode::raster) ? AA_SAMPLES_RASTER : AA_SAMPLES
         , renderModeAAStr[renderMode]
     );
 
