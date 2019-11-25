@@ -25,13 +25,13 @@
 
 struct VSOutput
 {
-    sample float4 position : SV_Position;
-    sample float3 worldPos : WorldPos;
-    sample float2 uv : TexCoord0;
-    sample float3 viewDir : TexCoord1;
-    sample float3 normal : Normal;
-    sample float3 tangent : Tangent;
-    sample float3 bitangent : Bitangent;
+    float4 position : SV_Position;
+    float3 worldPos : WorldPos;
+    float2 uv : TexCoord0;
+    float3 viewDir : TexCoord1;
+    float3 normal : Normal;
+    float3 tangent : Tangent;
+    float3 bitangent : Bitangent;
 };
 
 Texture2D<float3> texDiffuse        : register(t0);
