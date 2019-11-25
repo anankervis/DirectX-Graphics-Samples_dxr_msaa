@@ -31,28 +31,29 @@ struct ShadePixel
 
 // Enable this to pack colors down into a uint, makes it easier to do atomic framebuffer updates
 // when multiple threads could be shading quads that target the same pixel location.
+// (Ideally, we'd have access to float atomics in HLSL and not need this)
 #define PACKED_TILE_FB 1
 
 #if PACKED_TILE_FB
-# define TILE_FRAMEBUFFER_BITS 10
+# define TILE_FRAMEBUFFER_BITS 24
 # define TILE_FRAMEBUFFER_MASK ((1 << TILE_FRAMEBUFFER_BITS) - 1)
 # define TILE_FRAMEBUFFER_SCALE ((1 << (TILE_FRAMEBUFFER_BITS - AA_SAMPLES_LOG2)) - 1)
-groupshared uint tileFramebufferPacked[TILE_SIZE];
+groupshared uint3 tileFramebufferPacked[TILE_SIZE];
 
-uint tileFbPack(float3 c)
+uint3 tileFbPack(float3 c)
 {
-    return
-        (uint(c.x * TILE_FRAMEBUFFER_SCALE + .5f) << (TILE_FRAMEBUFFER_BITS * 0)) |
-        (uint(c.y * TILE_FRAMEBUFFER_SCALE + .5f) << (TILE_FRAMEBUFFER_BITS * 1)) |
-        (uint(c.z * TILE_FRAMEBUFFER_SCALE + .5f) << (TILE_FRAMEBUFFER_BITS * 2));
+    return uint3(
+        uint(c.x * TILE_FRAMEBUFFER_SCALE + .5f),
+        uint(c.y * TILE_FRAMEBUFFER_SCALE + .5f),
+        uint(c.z * TILE_FRAMEBUFFER_SCALE + .5f));
 }
 
-float3 tileFbUnpack(uint c)
+float3 tileFbUnpack(uint3 c)
 {
     return float3(
-        float((c >> (TILE_FRAMEBUFFER_BITS * 0)) & TILE_FRAMEBUFFER_MASK),
-        float((c >> (TILE_FRAMEBUFFER_BITS * 1)) & TILE_FRAMEBUFFER_MASK),
-        float((c >> (TILE_FRAMEBUFFER_BITS * 2)) & TILE_FRAMEBUFFER_MASK)) / (TILE_FRAMEBUFFER_SCALE * AA_SAMPLES);
+        float(c.x & TILE_FRAMEBUFFER_MASK),
+        float(c.y & TILE_FRAMEBUFFER_MASK),
+        float(c.z & TILE_FRAMEBUFFER_MASK)) / (TILE_FRAMEBUFFER_SCALE * AA_SAMPLES);
 }
 #else
 groupshared float3 tileFramebuffer[TILE_SIZE];
@@ -216,10 +217,12 @@ void BeamsQuadShade(
 
         shadeColor = clamp(shadeColor, 0.0f, 1.0f);
 
-        uint packedColor = tileFbPack(shadeColor);
+        uint3 packedColor = tileFbPack(shadeColor);
         packedColor *= sampleCount;
 
-        InterlockedAdd(tileFramebufferPacked[tileFbIndex], packedColor);
+        InterlockedAdd(tileFramebufferPacked[tileFbIndex].x, packedColor.x);
+        InterlockedAdd(tileFramebufferPacked[tileFbIndex].y, packedColor.y);
+        InterlockedAdd(tileFramebufferPacked[tileFbIndex].z, packedColor.z);
 #else
         tileFramebuffer[tileFbIndex] += sampleCount * ShadeQuadThread(
             threadID,

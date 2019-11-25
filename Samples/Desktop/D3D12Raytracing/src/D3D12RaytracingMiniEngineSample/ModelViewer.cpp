@@ -1328,9 +1328,18 @@ void DxrMsaaDemo::RenderScene()
             RenderObjects(gfxContext, m_ViewProjMatrix);
         }
 
-        gfxContext.TransitionResource(g_SceneColorBufferMsaa, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-        gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-        gfxContext.ResolveSubresource(g_SceneColorBuffer, 0, g_SceneColorBufferMsaa, 0, g_SceneColorBuffer.GetFormat());
+        if (AA_SAMPLES_RASTER > 1)
+        {
+            gfxContext.TransitionResource(g_SceneColorBufferMsaa, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+            gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+            gfxContext.ResolveSubresource(g_SceneColorBuffer, 0, g_SceneColorBufferMsaa, 0, g_SceneColorBuffer.GetFormat());
+        }
+        else
+        {
+            gfxContext.TransitionResource(g_SceneColorBufferMsaa, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_COPY_DEST);
+            gfxContext.CopySubresource(g_SceneColorBuffer, 0, g_SceneColorBufferMsaa, 0);
+        }
     }
     else
     {

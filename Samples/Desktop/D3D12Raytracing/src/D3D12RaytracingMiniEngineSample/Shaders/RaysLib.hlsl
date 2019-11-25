@@ -112,7 +112,7 @@ void RayGen()
         float3 origin, direction;
         GenerateCameraRay(
             DispatchRaysDimensions().xy,
-            DispatchRaysIndex().xy + AA_SAMPLE_OFFSET_TABLE[s],
+            DispatchRaysIndex().xy + AA_SAMPLE_OFFSET_TABLE[s] * float2(1, -1), // Y direction is flipped vs beam vis shader
             origin, direction);
 
         RayDesc rayDesc =
