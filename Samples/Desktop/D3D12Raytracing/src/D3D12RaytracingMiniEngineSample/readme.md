@@ -7,7 +7,7 @@ Note, this sample has been modified to emulate conservative beam tracing queries
 It has been tested on an NVIDIA Titan RTX, driver 436.30. There are some assumptions in the shader code related to 32-wide SIMD, so it might not run properly on non-NVIDIA hardware.
 
 ### New key bindings:
-* R - cycle render mode from 16x MSAA beams (default) to 1x raster to 16x SSAA rays
+* R - cycle render mode from 8x MSAA beams (default) to 8x MSAA raster to 8x SSAA rays
 
 ### Raster
 Renders the scene using traditional VS + PS + single-sampled rasterization.
@@ -111,7 +111,7 @@ Most of our use cases are fine with (and optimized for) a single point origin (p
 * QUAD_READ_GROUPSHARED_FALLBACK - set to 1 (default) to use groupshared memory to communicate between quad threads, 0 to use SM6.0 intrinsics
 * EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT - set to 1 (default) to apply camera-dependent enlargement to beam tracing AABBs to simulate conservative beam queries via regular ray queries
 * COLLECT_COUNTERS - set to 1 (default) to collect and display performance counters
-* AA_SAMPLES_LOG2 - 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x AA (default). Must also update AA_SAMPLE_OFFSET_TABLE to match.
+* AA_SAMPLES_LOG2 - 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x (default), 4 = 16x AA. Must also update AA_SAMPLE_OFFSET_TABLE to match.
 * AA_SAMPLE_OFFSET_TABLE - sampleOffset1x, sampleOffset2x, sampleOffset4x, sampleOffset8x, sampleOffset16x (default)
 * TRIS_PER_AABB - how many triangles per leaf node? (default 1)
 * default tile dimensions are 8x4 = 32 threads, some assumptions exist in the shaders that tile thread count == 32 == HW wave size
