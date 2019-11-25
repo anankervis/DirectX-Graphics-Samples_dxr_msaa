@@ -257,6 +257,9 @@ private:
     ReadbackBuffer m_countersReadback[countersReadbackCount];
     uint64_t m_frameIndex;
 
+    DepthBuffer g_SceneDepthBufferMsaa;
+    ColorBuffer g_SceneColorBufferMsaa;
+
     Vector3 m_SunDirection;
 
     struct CameraPosition
@@ -1005,6 +1008,19 @@ void DxrMsaaDemo::Startup()
 {
     m_frameIndex = 0;
 
+    g_SceneDepthBufferMsaa.Create(
+        L"g_SceneDepthBufferMsaa",
+        g_SceneDepthBuffer.GetWidth(), g_SceneDepthBuffer.GetHeight(),
+        AA_SAMPLES,
+        g_SceneDepthBuffer.GetFormat());
+
+    g_SceneColorBufferMsaa.SetMsaaMode(AA_SAMPLES, AA_SAMPLES);
+    g_SceneColorBufferMsaa.Create(
+        L"g_SceneColorBufferMsaa",
+        g_SceneColorBuffer.GetWidth(), g_SceneColorBuffer.GetHeight(),
+        1,
+        g_SceneColorBuffer.GetFormat());
+
     ThrowIfFailed(g_Device->QueryInterface(IID_PPV_ARGS(&g_pRaytracingDevice)), L"Couldn't get DirectX Raytracing interface for the device.\n");
 
     g_pRaytracingDescriptorHeap = std::unique_ptr<DescriptorHeapStack>(
@@ -1041,7 +1057,7 @@ void DxrMsaaDemo::Startup()
     m_ModelPSO.SetPrimitiveTopologyType(D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     m_ModelPSO.SetBlendState(BlendDisable);
     m_ModelPSO.SetDepthStencilState(DepthStateReadWrite);
-    m_ModelPSO.SetRenderTargetFormats(_countof(formats), formats, g_SceneDepthBuffer.GetFormat());
+    m_ModelPSO.SetRenderTargetFormats(_countof(formats), formats, g_SceneDepthBuffer.GetFormat(), AA_SAMPLES);
     m_ModelPSO.SetVertexShader( g_pModelViewerVS, sizeof(g_pModelViewerVS) );
     m_ModelPSO.SetPixelShader( g_pModelViewerPS, sizeof(g_pModelViewerPS) );
     m_ModelPSO.Finalize();
@@ -1287,16 +1303,16 @@ void DxrMsaaDemo::RenderScene()
 
     pfnSetupGraphicsState();
 
-    if (!skipDiffusePass)
+    if (renderMode == int(RenderMode::raster))
     {
         {
             ScopedTimer _prof(L"Render Color - Clear", gfxContext);
 
-            gfxContext.TransitionResource(g_SceneDepthBuffer, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
-            gfxContext.ClearDepth(g_SceneDepthBuffer);
+            gfxContext.TransitionResource(g_SceneDepthBufferMsaa, D3D12_RESOURCE_STATE_DEPTH_WRITE, true);
+            gfxContext.ClearDepth(g_SceneDepthBufferMsaa);
 
-            gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
-            gfxContext.ClearColor(g_SceneColorBuffer);
+            gfxContext.TransitionResource(g_SceneColorBufferMsaa, D3D12_RESOURCE_STATE_RENDER_TARGET, true);
+            gfxContext.ClearColor(g_SceneColorBufferMsaa);
         }
 
         {
@@ -1304,16 +1320,22 @@ void DxrMsaaDemo::RenderScene()
 
             gfxContext.SetDynamicConstantBufferView(1, sizeof(shadeConstants), &shadeConstants);
 
-            D3D12_CPU_DESCRIPTOR_HANDLE rtvs[]{ g_SceneColorBuffer.GetRTV() };
-            gfxContext.SetRenderTargets(_countof(rtvs), rtvs, g_SceneDepthBuffer.GetDSV());
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvs[]{ g_SceneColorBufferMsaa.GetRTV() };
+            gfxContext.SetRenderTargets(_countof(rtvs), rtvs, g_SceneDepthBufferMsaa.GetDSV());
             gfxContext.SetViewportAndScissor(m_MainViewport, m_MainScissor);
 
             gfxContext.SetPipelineState(m_ModelPSO);
             RenderObjects(gfxContext, m_ViewProjMatrix);
         }
-    }
 
-    Raytrace(gfxContext);
+        gfxContext.TransitionResource(g_SceneColorBufferMsaa, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+        gfxContext.TransitionResource(g_SceneColorBuffer, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        gfxContext.ResolveSubresource(g_SceneColorBuffer, 0, g_SceneColorBufferMsaa, 0, g_SceneColorBuffer.GetFormat());
+    }
+    else
+    {
+        Raytrace(gfxContext);
+    }
 
     gfxContext.Finish();
 
@@ -1482,7 +1504,7 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     text.DrawFormattedString("Million Primary Rays/s: %7.3f\n", primaryRaysPerSec);
     text.DrawFormattedString("RenderMode: %s %dx %s\n"
         , renderModeStr[renderMode]
-        , renderMode == int(RenderMode::raster) ? 1 : AA_SAMPLES
+        , AA_SAMPLES
         , renderModeAAStr[renderMode]
     );
 

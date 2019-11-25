@@ -480,6 +480,16 @@ void CommandContext::CopySubresource(GpuResource& Dest, UINT DestSubIndex, GpuRe
     m_CommandList->CopyTextureRegion(&DestLocation, 0, 0, 0, &SrcLocation, nullptr);
 }
 
+void CommandContext::ResolveSubresource(GpuResource& Dest, UINT DestSubIndex, GpuResource& Src, UINT SrcSubIndex, DXGI_FORMAT Format)
+{
+    FlushResourceBarriers();
+
+    m_CommandList->ResolveSubresource(
+        Dest.GetResource(), DestSubIndex,
+        Src.GetResource(), SrcSubIndex,
+        Format);
+}
+
 void CommandContext::InitializeTextureArraySlice(GpuResource& Dest, UINT SliceIndex, GpuResource& Src)
 {
     CommandContext& Context = CommandContext::Begin();

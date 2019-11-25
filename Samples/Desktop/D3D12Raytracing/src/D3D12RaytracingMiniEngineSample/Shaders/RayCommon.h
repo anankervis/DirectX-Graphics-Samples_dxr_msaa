@@ -13,8 +13,9 @@
 
 // 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
 // Don't forget to update AA_SAMPLE_OFFSET_TABLE to point to the corresponding table.
-#define AA_SAMPLES_LOG2 4
-#define AA_SAMPLE_OFFSET_TABLE sampleOffset16x
+// 16x is not supported by most GPUs
+#define AA_SAMPLES_LOG2 3
+#define AA_SAMPLE_OFFSET_TABLE sampleOffset8x
 #define AA_SAMPLES (1 << AA_SAMPLES_LOG2)
 #define AA_SAMPLE_MASK ((uint(1) << AA_SAMPLES) - 1)
 
