@@ -10,7 +10,7 @@ It has been tested on an NVIDIA Titan RTX, driver 436.30. There are some assumpt
 * R - cycle render mode from 8x MSAA beams (default) to 8x MSAA raster to 8x SSAA rays
 
 ### Raster
-Renders the scene using traditional VS + PS + single-sampled rasterization.
+Renders the scene using traditional VS + PS + MSAA rasterization.
 
 ### Rays
 [Shaders/RaysLib.hlsl](Shaders/RaysLib.hlsl)
