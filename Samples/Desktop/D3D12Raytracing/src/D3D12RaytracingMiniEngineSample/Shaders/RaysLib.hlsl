@@ -98,10 +98,11 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         ShadowPayload shadowPayload;
         shadowPayload.opacity = 1.0f;
 
+        float tMin = .01f;
         RayDesc shadowRayDesc =
         {
             tri.worldPos,
-            0.0f,
+            tMin,
             shadeConstants.sunDirection,
             FLT_MAX,
         };
