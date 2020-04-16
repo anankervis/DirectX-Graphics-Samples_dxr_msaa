@@ -66,6 +66,8 @@ MRT main(VSOutput vsOutput)
 
     float specularMask = .1; // TODO: read the texture
 
+    float shadow = 1.0f;
+
     mrt.Color = Shade(
         texDiffuse.Sample(sampler0, vsOutput.uv),
         shadeConstants.ambientColor,
@@ -75,7 +77,8 @@ MRT main(VSOutput vsOutput)
         normal,
         normalize(vsOutput.viewDir),
         shadeConstants.sunDirection,
-        shadeConstants.sunColor);
+        shadeConstants.sunColor,
+        shadow);
 
     return mrt;
 }

@@ -66,7 +66,7 @@ namespace EngineProfiling
     extern BoolVar ExpandAll;
 }
 
-#define PROFILE_MODE 1 // pre-set a bunch of config vars to facilitate quick profiling iteration times
+#define PROFILE_MODE 0 // pre-set a bunch of config vars to facilitate quick profiling iteration times
 
 CComPtr<ID3D12Device5> g_pRaytracingDevice;
 
@@ -112,15 +112,13 @@ const char* renderModeStr[] =
     "Rays",
     "Beams",
 };
-EnumVar renderMode("Application/Raytracing/RenderMode", int(RenderMode::beams), int(RenderMode::count), renderModeStr);
+EnumVar renderMode("Application/Raytracing/RenderMode", int(RenderMode::rays), int(RenderMode::count), renderModeStr);
 const char* renderModeAAStr[] =
 {
     "MSAA",
     "SSAA",
     "MSAA",
 };
-
-const static UINT MaxRayRecursion = 1;
 
 const static UINT c_NumCameraPositions = 5;
 
@@ -134,31 +132,36 @@ struct RaytracingDispatchRayInputs
         UINT HitGroupStride,
         UINT HitGroupTableSize,
         LPCWSTR rayGenExportName,
-        LPCWSTR missExportName) : m_pPSO(pPSO)
+        LPCWSTR *missExportName,
+        uint32_t missShaderCount)
+        : m_HitGroupStride(HitGroupStride)
+        , m_pPSO(pPSO)
     {
-        const UINT shaderTableSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
         ID3D12StateObjectProperties* stateObjectProperties = nullptr;
         ThrowIfFailed(pPSO->QueryInterface(IID_PPV_ARGS(&stateObjectProperties)));
-        void *pRayGenShaderData = stateObjectProperties->GetShaderIdentifier(rayGenExportName);
-        void *pMissShaderData = stateObjectProperties->GetShaderIdentifier(missExportName);
-
-        m_HitGroupStride = HitGroupStride;
 
         // MiniEngine requires that all initial data be aligned to 16 bytes
-        UINT alignment = 16;
-        std::vector<BYTE> alignedShaderTableData(shaderTableSize + alignment - 1);
-        BYTE *pAlignedShaderTableData = alignedShaderTableData.data() + ((UINT64)alignedShaderTableData.data() % alignment);
+        constexpr uint32_t maxShaderTableEntries = 2;
+        __declspec(align(16)) uint8_t shaderTableInitData[D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES * maxShaderTableEntries];
 
-        if (pRayGenShaderData)
+        if (rayGenExportName)
         {
-            memcpy(pAlignedShaderTableData, pRayGenShaderData, shaderTableSize);
-            m_RayGenShaderTable.Create(L"Ray Gen Shader Table", 1, shaderTableSize, alignedShaderTableData.data());
+            void *pRayGenShaderData = stateObjectProperties->GetShaderIdentifier(rayGenExportName);
+            ASSERT(pRayGenShaderData);
+            memcpy(shaderTableInitData, pRayGenShaderData, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+            m_RayGenShaderTable.Create(L"Ray Gen Shader Table", 1, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, shaderTableInitData);
         }
         
-        if (pMissShaderData)
+        ASSERT(missShaderCount <= maxShaderTableEntries);
+        for (uint32_t n = 0; n < missShaderCount; n++)
         {
-            memcpy(pAlignedShaderTableData, pMissShaderData, shaderTableSize);
-            m_MissShaderTable.Create(L"Miss Shader Table", 1, shaderTableSize, alignedShaderTableData.data());
+            void *pMissShaderData = stateObjectProperties->GetShaderIdentifier(missExportName[n]);
+            ASSERT(pMissShaderData);
+            memcpy(shaderTableInitData + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES * n, pMissShaderData, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        }
+        if (missShaderCount > 0)
+        {
+            m_MissShaderTable.Create(L"Miss Shader Table", missShaderCount, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES, shaderTableInitData);
         }
         
         if (pHitGroupShaderTable)
@@ -505,13 +508,28 @@ D3D12_STATE_SUBOBJECT CreateDxilLibrary(LPCWSTR entrypoint, const void *pShaderB
     return dxilLibSubObject;
 }
 
-void SetPipelineStateStackSize(LPCWSTR raygen, LPCWSTR closestHit, LPCWSTR miss, UINT maxRecursion, ID3D12StateObject *pStateObject)
+void SetPipelineStateStackSize(
+    LPCWSTR raygenExportName,
+    LPCWSTR closestHitExportName,
+    LPCWSTR *missExportName,
+    uint32_t missShaderCount,
+    UINT maxRecursion,
+    ID3D12StateObject *pStateObject)
 {
+    ASSERT(maxRecursion > 0);
+
     ID3D12StateObjectProperties* stateObjectProperties = nullptr;
     ThrowIfFailed(pStateObject->QueryInterface(IID_PPV_ARGS(&stateObjectProperties)));
-    UINT64 closestHitStackSize = stateObjectProperties->GetShaderStackSize(closestHit);
-    UINT64 missStackSize = stateObjectProperties->GetShaderStackSize(miss);
-    UINT64 raygenStackSize = stateObjectProperties->GetShaderStackSize(raygen);
+
+    UINT64 raygenStackSize = stateObjectProperties->GetShaderStackSize(raygenExportName);
+
+    UINT64 closestHitStackSize = stateObjectProperties->GetShaderStackSize(closestHitExportName);
+
+    UINT64 missStackSize = 0;
+    for (uint32_t n = 0; n < missShaderCount; n++)
+    {
+        missStackSize = std::max(missStackSize, stateObjectProperties->GetShaderStackSize(missExportName[n]));
+    }
 
     UINT64 totalStackSize = raygenStackSize + std::max(missStackSize, closestHitStackSize) * maxRecursion;
     stateObjectProperties->SetPipelineStackSize(totalStackSize);
@@ -589,12 +607,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     LPCWSTR exportName_AnyHit = L"AnyHit";
     LPCWSTR exportName_Hit = L"Hit";
     LPCWSTR exportName_Miss = L"Miss";
+    LPCWSTR exportName_MissShadow = L"MissShadow";
     LPCWSTR exportName_HitGroup = L"HitGroup";
 
     UINT nodeMask = 1;
-
-    D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
-    pipelineConfig.MaxTraceRecursionDepth = MaxRayRecursion;
 
     const UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
     const UINT offsetToDescriptorHandle = ALIGN(sizeof(D3D12_GPU_DESCRIPTOR_HANDLE), shaderIdentifierSize);
@@ -624,15 +640,22 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
     // ray shaders
     {
+        D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
+        pipelineConfig.MaxTraceRecursionDepth = 1;
+#if SHADOWS
+        pipelineConfig.MaxTraceRecursionDepth += 1;
+#endif
+
         D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
         shaderConfig.MaxAttributeSizeInBytes = 8;
         shaderConfig.MaxPayloadSizeInBytes = sizeof(RayPayload);
 
         D3D12_EXPORT_DESC exportDesc[] =
         {
-            { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_RayGen,        nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Hit,           nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss,          nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_MissShadow,    nullptr, D3D12_EXPORT_FLAG_NONE },
         };
         D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
         {
@@ -666,21 +689,39 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             stateSubobjects
         };
 
+        LPCWSTR missShaderNames[] =
+        {
+            exportName_Miss,
+            exportName_MissShadow,
+        };
+
         CComPtr<ID3D12StateObject> pDiffusePSO;
         g_pRaytracingDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&pDiffusePSO));
         GetShaderTable(m_Model, pDiffusePSO, pHitShaderTable.data());
         g_RaytracingInputs_Ray = RaytracingDispatchRayInputs(
-            *g_pRaytracingDevice, pDiffusePSO, pHitShaderTable.data(), shaderRecordSizeInBytes,
-            (UINT)pHitShaderTable.size(), exportName_RayGen, exportName_Miss);
+            *g_pRaytracingDevice,
+            pDiffusePSO,
+            pHitShaderTable.data(),
+            shaderRecordSizeInBytes,
+            (UINT)pHitShaderTable.size(),
+            exportName_RayGen,
+            missShaderNames, _countof(missShaderNames));
 
         WCHAR hitGroupExportNameClosestHitType[64];
         swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
         SetPipelineStateStackSize(
-            exportName_RayGen, hitGroupExportNameClosestHitType, exportName_Miss, MaxRayRecursion, g_RaytracingInputs_Ray.m_pPSO);
+            exportName_RayGen,
+            hitGroupExportNameClosestHitType,
+            missShaderNames, _countof(missShaderNames),
+            pipelineConfig.MaxTraceRecursionDepth,
+            g_RaytracingInputs_Ray.m_pPSO);
     }
 
     // beam shaders
     {
+        D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
+        pipelineConfig.MaxTraceRecursionDepth = 1;
+
         D3D12_RAYTRACING_SHADER_CONFIG shaderConfig;
         shaderConfig.MaxAttributeSizeInBytes = sizeof(BeamHitAttribs);
         shaderConfig.MaxPayloadSizeInBytes = sizeof(BeamPayload);
@@ -727,17 +768,31 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             stateSubobjects
         };
 
+        LPCWSTR missShaderNames[] =
+        {
+            exportName_Miss,
+        };
+
         CComPtr<ID3D12StateObject> pBeamsPSO;
         g_pRaytracingDevice->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&pBeamsPSO));
         GetShaderTable(m_Model, pBeamsPSO, pHitShaderTable.data());
         g_RaytracingInputs_Beam = RaytracingDispatchRayInputs(
-            *g_pRaytracingDevice, pBeamsPSO, pHitShaderTable.data(), shaderRecordSizeInBytes,
-            (UINT)pHitShaderTable.size(), exportName_RayGen, exportName_Miss);
+            *g_pRaytracingDevice,
+            pBeamsPSO,
+            pHitShaderTable.data(),
+            shaderRecordSizeInBytes,
+            (UINT)pHitShaderTable.size(),
+            exportName_RayGen,
+            missShaderNames, _countof(missShaderNames));
 
         WCHAR hitGroupExportNameClosestHitType[64];
         swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
         SetPipelineStateStackSize(
-            exportName_RayGen, hitGroupExportNameClosestHitType, exportName_Miss, MaxRayRecursion, g_RaytracingInputs_Beam.m_pPSO);
+            exportName_RayGen,
+            hitGroupExportNameClosestHitType,
+            missShaderNames, _countof(missShaderNames),
+            pipelineConfig.MaxTraceRecursionDepth,
+            g_RaytracingInputs_Beam.m_pPSO);
     }
 
     // beam post processing shaders
@@ -1517,7 +1572,12 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
         , renderModeAAStr[renderMode]
     );
 
+    Vector3 camPos = m_Camera.GetPosition();
+    text.DrawFormattedString("<%.1f, %.1f, %.1f>\n", float(camPos.GetX()), float(camPos.GetY()), float(camPos.GetZ()));
+
 #if COLLECT_COUNTERS
+    text.DrawFormattedString("\n");
+
     int countersReadIndex = (m_frameIndex + 1) % countersReadbackCount;
     const Counters *counters = (const Counters*)m_countersReadback[countersReadIndex].Map();
 
@@ -1547,6 +1607,9 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(shadeNoQuads);
     PRINT_COUNTER(shadeOverflow);
     PRINT_COUNTER(shadeQuads);
+
+    PRINT_COUNTER(shadowLaunchCount);
+    PRINT_COUNTER(shadowMissCount);
 
 # undef PRINT_COUNTER
 

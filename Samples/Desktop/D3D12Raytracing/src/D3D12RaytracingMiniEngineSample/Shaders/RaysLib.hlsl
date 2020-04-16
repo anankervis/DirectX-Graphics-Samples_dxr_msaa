@@ -24,6 +24,21 @@ cbuffer b0 : register(b0)
     ShadeConstants shadeConstants;
 };
 
+#if SHADOWS
+struct ShadowPayload
+{
+    float opacity;
+};
+
+[shader("miss")]
+void MissShadow(inout ShadowPayload payload)
+{
+    PERF_COUNTER(shadowMissCount, 1);
+
+    payload.opacity = 0.0f;
+}
+#endif
+
 [shader("closesthit")]
 void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
@@ -77,6 +92,34 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float3 viewDir = normalize(rayDir);
     float specularMask = .1; // TODO: read the texture
 
+#if SHADOWS
+    float shadow = 1.0f;
+    {
+        ShadowPayload shadowPayload;
+        shadowPayload.opacity = 1.0f;
+
+        RayDesc shadowRayDesc =
+        {
+            tri.worldPos,
+            0.0f,
+            shadeConstants.sunDirection,
+            FLT_MAX,
+        };
+
+        PERF_COUNTER(shadowLaunchCount, 1);
+        uint missShaderIndex = 1;
+        TraceRay(
+            g_accel,
+            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+            ~0, 0, 1, missShaderIndex,
+            shadowRayDesc, shadowPayload);
+
+        shadow *= 1.0f - shadowPayload.opacity;
+    }
+#else
+    float shadow = 1.0f;
+#endif
+
     float3 outputColor = Shade(
         diffuseColor,
         shadeConstants.ambientColor,
@@ -86,7 +129,8 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         normal,
         viewDir,
         shadeConstants.sunDirection,
-        shadeConstants.sunColor);
+        shadeConstants.sunColor,
+        shadow);
 
     payload.color += outputColor;
 }
@@ -120,7 +164,7 @@ void RayGen()
             origin,
             0.0f,
             direction,
-            FLT_MAX
+            FLT_MAX,
         };
 
         TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);

@@ -108,6 +108,8 @@ float3 ShadeQuadThread(
     float3 viewDir = normalize(rayDir);
     float specularMask = .1; // TODO: read the texture
 
+    float shadow = 1.0f;
+
     float3 outputColor = Shade(
         diffuseColor,
         shadeConstants.ambientColor,
@@ -117,7 +119,8 @@ float3 ShadeQuadThread(
         normal,
         viewDir,
         shadeConstants.sunDirection,
-        shadeConstants.sunColor);
+        shadeConstants.sunColor,
+        shadow);
 
     return outputColor;
 }

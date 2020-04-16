@@ -86,6 +86,9 @@ struct Counters
     uint shadeNoQuads;
     uint shadeOverflow;
     uint shadeQuads;
+
+    uint shadowLaunchCount;
+    uint shadowMissCount;
 };
 #if COLLECT_COUNTERS
 # define PERF_COUNTER(counter, value) InterlockedAdd(g_counters[0]. counter, value)

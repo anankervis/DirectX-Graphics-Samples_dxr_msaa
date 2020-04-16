@@ -10,6 +10,8 @@
 # define STRUCT_ALIGN(x) __declspec(align(x))
 #endif
 
+#define SHADOWS 1
+
 STRUCT_ALIGN(16) struct ShadeConstants
 {
     float3 sunDirection; uint pad0;
@@ -59,15 +61,16 @@ float3 ApplyLightCommon(
 }
 
 float3 Shade(
-    float3    diffuseColor,  
-    float3    ambientColor,
-    float3    specularColor, 
-    float     specularMask,  
-    float     gloss,         
-    float3    normal,        
-    float3    viewDir,       
-    float3    lightDir,      
-    float3    lightColor     
+    float3 diffuseColor,
+    float3 ambientColor,
+    float3 specularColor,
+    float  specularMask,
+    float  gloss,
+    float3 normal,
+    float3 viewDir,
+    float3 lightDir,
+    float3 lightColor,
+    float  shadow
 )
 {
     float3 colorSum = 0;
@@ -75,7 +78,6 @@ float3 Shade(
     float ssao = 1.0f;
     colorSum += ambientColor * diffuseColor * ssao;
 
-    float shadow = 1.0f;
     colorSum += shadow * ApplyLightCommon(
         diffuseColor,
         specularColor,
