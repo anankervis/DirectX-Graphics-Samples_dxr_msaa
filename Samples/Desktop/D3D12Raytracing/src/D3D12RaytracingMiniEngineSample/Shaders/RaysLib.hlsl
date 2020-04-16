@@ -24,7 +24,7 @@ cbuffer b0 : register(b0)
     ShadeConstants shadeConstants;
 };
 
-#if SHADOWS
+#if SHADOW_MODE
 struct ShadowPayload
 {
     float opacity;
@@ -44,6 +44,8 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
 {
     PERF_COUNTER(closestHitCount, 1);
 
+    uint sampleIndex = payload.sampleIndex;
+
     float3 rayDir = WorldRayDirection();
     uint meshID = rootConstants.meshID;
     uint primID = PrimitiveIndex();
@@ -57,8 +59,16 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     // find the UVWs of +1 X and +1 Y pixels, then calculate texcoord derivatives with finite differencing
     float3 rayOriginDX, rayDirDX;
     float3 rayOriginDY, rayDirDY;
-    GenerateCameraRay(DispatchRaysDimensions().xy, DispatchRaysIndex().xy + uint2(1, 0), rayOriginDX, rayDirDX);
-    GenerateCameraRay(DispatchRaysDimensions().xy, DispatchRaysIndex().xy + uint2(0, 1), rayOriginDY, rayDirDY);
+    GenerateCameraRay(
+        DispatchRaysDimensions().xy,
+        DispatchRaysIndex().xy + uint2(1, 0) + AA_SAMPLE_OFFSET_TABLE[sampleIndex] * float2(1, -1), // Y direction is flipped vs beam vis shader
+        rayOriginDX,
+        rayDirDX);
+    GenerateCameraRay(
+        DispatchRaysDimensions().xy,
+        DispatchRaysIndex().xy + uint2(0, 1) + AA_SAMPLE_OFFSET_TABLE[sampleIndex] * float2(1, -1), // Y direction is flipped vs beam vis shader
+        rayOriginDY,
+        rayDirDY);
 
     Triangle triPos = triFetch(meshID, primID);
     float4 uvwtDX = triIntersectNoFail(rayOriginDX, rayDirDX, triPos);
@@ -92,18 +102,40 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float3 viewDir = normalize(rayDir);
     float specularMask = .1; // TODO: read the texture
 
-#if SHADOWS
+#if SHADOW_MODE
     float shadow = 1.0f;
     {
         ShadowPayload shadowPayload;
         shadowPayload.opacity = 1.0f;
+
+#if SHADOW_MODE == SHADOW_MODE_SOFT
+        // soft shadows
+        // use the area light to constrain the sampling region
+        // each shading sample will shoot a shadow ray distributed somewhere on the area light surface
+
+// TODO: take extra samples, sampleIndex * SHADOW_SOFT_SAMPLE_MULTIPLIER + extraSampleIndex
+
+        float s = shadowRandom(float2(sampleIndex, 0)) * 2.0f - 1.0f;
+        float t = shadowRandom(float2(0, sampleIndex)) * 2.0f - 1.0f;
+
+        float3 shadowTarget = AREA_LIGHT_CENTER;
+        shadowTarget += float3(s, 0, 0) * (AREA_LIGHT_EXTENT).x;
+        shadowTarget += float3(0, 0, t) * (AREA_LIGHT_EXTENT).z;
+
+        float3 shadowRayDir = shadowTarget;
+#else
+        // hard shadows
+        // use the directional light
+        // each shading sample will shoot one shadow ray, so we'll get super-sampled anti-aliased hard shadows
+        float3 shadowRayDir = shadeConstants.sunDirection;
+#endif
 
         float tMin = .01f;
         RayDesc shadowRayDesc =
         {
             tri.worldPos,
             tMin,
-            shadeConstants.sunDirection,
+            shadowRayDir,
             FLT_MAX,
         };
 
@@ -154,11 +186,14 @@ void RayGen()
 
     for (uint s = 0; s < AA_SAMPLES; s++)
     {
+        payload.sampleIndex = s;
+
         float3 origin, direction;
         GenerateCameraRay(
             DispatchRaysDimensions().xy,
             DispatchRaysIndex().xy + AA_SAMPLE_OFFSET_TABLE[s] * float2(1, -1), // Y direction is flipped vs beam vis shader
-            origin, direction);
+            origin,
+            direction);
 
         RayDesc rayDesc =
         {

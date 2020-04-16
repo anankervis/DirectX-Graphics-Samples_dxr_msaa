@@ -10,7 +10,11 @@
 # define STRUCT_ALIGN(x) __declspec(align(x))
 #endif
 
-#define SHADOWS 1
+#define SHADOW_MODE_NONE 0
+#define SHADOW_MODE_HARD 1
+#define SHADOW_MODE_SOFT 2
+
+#define SHADOW_MODE SHADOW_MODE_SOFT
 
 STRUCT_ALIGN(16) struct ShadeConstants
 {
@@ -20,6 +24,21 @@ STRUCT_ALIGN(16) struct ShadeConstants
 };
 
 #ifdef HLSL
+
+# if SHADOW_MODE == SHADOW_MODE_SOFT
+# define AREA_LIGHT_CENTER float3(-61, 1296, -38)
+# define AREA_LIGHT_EXTENT float3(907, 0, 189)
+
+// https://stackoverflow.com/questions/5149544/can-i-generate-a-random-number-inside-a-pixel-shader
+float shadowRandom(float2 p)
+{
+    float2 K1 = float2(
+        23.14069263277926f, // e^pi (Gelfond's constant)
+         2.665144142690225f // 2^sqrt(2) (Gelfond-Schneider constant)
+    );
+    return frac(cos(dot(p, K1)) * 12345.6789f);
+}
+# endif
 
 void AntiAliasSpecular(inout float3 texNormal, inout float gloss)
 {

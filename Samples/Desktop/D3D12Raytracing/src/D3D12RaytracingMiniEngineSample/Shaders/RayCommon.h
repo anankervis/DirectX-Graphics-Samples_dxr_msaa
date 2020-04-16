@@ -149,6 +149,7 @@ struct RootConstants
 struct RayPayload
 {
     float3 color;
+    uint sampleIndex;
 };
 
 struct BeamPayload

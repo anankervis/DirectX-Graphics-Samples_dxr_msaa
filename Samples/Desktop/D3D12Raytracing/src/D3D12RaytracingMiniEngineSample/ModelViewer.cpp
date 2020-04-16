@@ -642,7 +642,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     {
         D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
         pipelineConfig.MaxTraceRecursionDepth = 1;
-#if SHADOWS
+#if SHADOW_MODE
         pipelineConfig.MaxTraceRecursionDepth += 1;
 #endif
 
