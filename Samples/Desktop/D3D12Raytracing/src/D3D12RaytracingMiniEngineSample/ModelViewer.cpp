@@ -338,8 +338,8 @@ int wmain(int argc, wchar_t** argv)
 
 ExpVar m_SunLightIntensity("Application/Lighting/Sun Light Intensity", 4.0f, 0.0f, 16.0f, 0.1f);
 ExpVar m_AmbientIntensity("Application/Lighting/Ambient Intensity", 0.1f, -16.0f, 16.0f, 0.1f);
-NumVar m_SunOrientation("Application/Lighting/Sun Orientation", -0.5f, -100.0f, 100.0f, 0.1f );
-NumVar m_SunInclination("Application/Lighting/Sun Inclination", 0.75f, 0.0f, 1.0f, 0.01f );
+NumVar m_SunOrientation("Application/Lighting/Sun Orientation", 0.0f, -100.0f, 100.0f, 0.1f );
+NumVar m_SunInclination("Application/Lighting/Sun Inclination", 1.0f, 0.0f, 1.0f, 0.01f );
 
 class DescriptorHeapStack
 {

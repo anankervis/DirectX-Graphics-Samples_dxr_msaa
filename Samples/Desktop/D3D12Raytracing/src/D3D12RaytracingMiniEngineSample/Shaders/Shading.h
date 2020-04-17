@@ -26,6 +26,9 @@
 #endif
 #define SHADOW_SAMPLES (1 << SHADOW_SAMPLES_LOG2)
 
+// smaller numbers to scale the area light extents down, to create harder shadows
+#define SHADOW_AREA_LIGHT_SCALE .01f
+
 STRUCT_ALIGN(16) struct ShadeConstants
 {
     float3 sunDirection; uint pad0;
@@ -37,7 +40,7 @@ STRUCT_ALIGN(16) struct ShadeConstants
 
 # if SHADOW_MODE == SHADOW_MODE_SOFT
 # define AREA_LIGHT_CENTER float3(-61, 1296, -38)
-# define AREA_LIGHT_EXTENT float3(907, 0, 189)
+# define AREA_LIGHT_EXTENT (float3(907, 0, 189) * SHADOW_AREA_LIGHT_SCALE)
 
 float2 shadowRandom(uint2 p, uint sampleIndex)
 {

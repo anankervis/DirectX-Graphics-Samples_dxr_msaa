@@ -163,7 +163,7 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         shadeConstants.sunDirection,
         shadeConstants.sunColor,
         shadow);
-//outputColor = float3(shadow, shadow, shadow);
+outputColor = float3(shadow, shadow, shadow);
 
     payload.color += outputColor;
 }
