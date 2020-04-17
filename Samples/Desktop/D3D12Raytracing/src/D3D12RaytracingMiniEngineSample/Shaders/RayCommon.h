@@ -9,7 +9,7 @@
 // and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
-#define COLLECT_COUNTERS 1
+#define COLLECT_COUNTERS 0
 
 // 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
 // Don't forget to update AA_SAMPLE_OFFSET_TABLE to point to the corresponding table.

@@ -16,6 +16,16 @@
 
 #define SHADOW_MODE SHADOW_MODE_SOFT
 
+// For soft shadow mode, how many extra samples do we take?
+// This is a multiplier on top of the number of AA samples we're already taking.
+// 0 = 1x, 1 = 2x, 2 = 4x, 3 = 8x, 4 = 16x
+#if SHADOW_MODE == SHADOW_MODE_SOFT
+# define SHADOW_SAMPLES_LOG2 2
+#else
+# define SHADOW_SAMPLES_LOG2 0
+#endif
+#define SHADOW_SAMPLES (1 << SHADOW_SAMPLES_LOG2)
+
 STRUCT_ALIGN(16) struct ShadeConstants
 {
     float3 sunDirection; uint pad0;
@@ -29,14 +39,15 @@ STRUCT_ALIGN(16) struct ShadeConstants
 # define AREA_LIGHT_CENTER float3(-61, 1296, -38)
 # define AREA_LIGHT_EXTENT float3(907, 0, 189)
 
-// https://stackoverflow.com/questions/5149544/can-i-generate-a-random-number-inside-a-pixel-shader
-float shadowRandom(float2 p)
+float2 shadowRandom(uint2 p, uint sampleIndex)
 {
-    float2 K1 = float2(
-        23.14069263277926f, // e^pi (Gelfond's constant)
-         2.665144142690225f // 2^sqrt(2) (Gelfond-Schneider constant)
-    );
-    return frac(cos(dot(p, K1)) * 12345.6789f);
+    uint x = sampleIndex * 1704635963 + p.x * 2704612033 + p.y * 3704636251;
+    x = x * (x >> 17) + 0x3fe6835b;
+    uint y = sampleIndex * 2104636799 + p.x * 3004635791 + p.y * 4104635947;
+    y = y * (y >> 15) + 0xd3ab4b52;
+    return float2(
+        (x % 2048) / 2048.0f,
+        (y % 2048) / 2048.0f) * 2.0f - 1.0f;
 }
 # endif
 
