@@ -89,7 +89,8 @@ struct BVH
     CComPtr<ID3D12Resource> bottom;
 };
 BVH g_bvhTriangles;
-BVH g_bvhAABBs;
+BVH g_bvhAABBs_primary;
+BVH g_bvhAABBs_shadow;
 
 CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
 CComPtr<ID3D12RootSignature> g_LocalRaytracingRootSignature;
@@ -223,8 +224,19 @@ public:
 
 private:
 
-    void createAABBs();
-    void createBvh(BVH &bvh, bool triangles);
+    void createAABBs(
+        StructuredBuffer& aabbBuffer
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+        , float camPosX, float camPosY, float camPosZ
+        , float camRightX, float camRightY, float camRightZ
+        , float camUpX, float camUpY, float camUpZ
+        , float camForwardX, float camForwardY, float camForwardZ
+        , float camFoV
+        , float camAspect
+        , uint32_t tilesX, uint32_t tilesY
+#endif
+    );
+    void createBvh(BVH &bvh, bool useAABBs, StructuredBuffer* aabbBuffer);
 
     void InitializeSceneInfo();
     void InitializeRaytracingStateObjects();
@@ -246,7 +258,8 @@ private:
     D3D12_CPU_DESCRIPTOR_HANDLE m_DefaultSampler;
 
     Model m_Model;
-    StructuredBuffer m_ModelAABBs;
+    StructuredBuffer m_ModelAABBs_primary;
+    StructuredBuffer m_ModelAABBs_shadow;
 
     uint32_t m_tilesX;
     uint32_t m_tilesY;
@@ -565,7 +578,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     uavDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     uavDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
 
-    CD3DX12_ROOT_PARAMETER1 globalRootSignatureParameters[7];
+    CD3DX12_ROOT_PARAMETER1 globalRootSignatureParameters[8];
     globalRootSignatureParameters[0].InitAsDescriptorTable(1, &sceneBuffersDescriptorRange);
     globalRootSignatureParameters[1].InitAsConstantBufferView(0);
     globalRootSignatureParameters[2].InitAsConstantBufferView(1);
@@ -573,6 +586,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     globalRootSignatureParameters[4].InitAsUnorderedAccessView(0);
     globalRootSignatureParameters[5].InitAsUnorderedAccessView(1);
     globalRootSignatureParameters[6].InitAsShaderResourceView(0);
+    globalRootSignatureParameters[7].InitAsShaderResourceView(20);
     auto globalRootSignatureDesc = CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC(
         _countof(globalRootSignatureParameters), globalRootSignatureParameters,
         _countof(staticSamplerDescs), staticSamplerDescs);
@@ -819,34 +833,26 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     }
 }
 
-void DxrMsaaDemo::createAABBs()
+void DxrMsaaDemo::createAABBs(
+    StructuredBuffer& aabbBuffer
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+    , float camPosX, float camPosY, float camPosZ
+    , float camRightX, float camRightY, float camRightZ
+    , float camUpX, float camUpY, float camUpZ
+    , float camForwardX, float camForwardY, float camForwardZ
+    , float camFoV
+    , float camAspect
+    , uint32_t tilesX, uint32_t tilesY
+#endif
+)
 {
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
-    float camPosX = m_Camera.GetPosition().GetX();
-    float camPosY = m_Camera.GetPosition().GetY();
-    float camPosZ = m_Camera.GetPosition().GetZ();
-
-    float camRightX = m_Camera.GetRightVec().GetX();
-    float camRightY = m_Camera.GetRightVec().GetY();
-    float camRightZ = m_Camera.GetRightVec().GetZ();
-
-    float camUpX = m_Camera.GetUpVec().GetX();
-    float camUpY = m_Camera.GetUpVec().GetY();
-    float camUpZ = m_Camera.GetUpVec().GetZ();
-
-    float camForwardX = m_Camera.GetForwardVec().GetX();
-    float camForwardY = m_Camera.GetForwardVec().GetY();
-    float camForwardZ = m_Camera.GetForwardVec().GetZ();
-
-    float camFoV = m_Camera.GetFOV();
-    float camAspect = float(g_SceneColorBuffer.GetWidth()) / g_SceneColorBuffer.GetHeight();
-
     // TODO: if not requesting a fully conservative beam query, the tile size should be inset
     // to the bounding box of the actual samples... in the case of 1x (no AA), it would be
     // inset to the pixel centers of the outer corner pixels of the beam tile. This will give a tighter
     // fit and allow fewer triangles through.
-    float tileSizeXAt1 = tanf(camFoV * .5f) * camAspect / m_tilesX;
-    float tileSizeYAt1 = tanf(camFoV * .5f) / m_tilesY;
+    float tileSizeXAt1 = tanf(camFoV * .5f) * camAspect / tilesX;
+    float tileSizeYAt1 = tanf(camFoV * .5f) / tilesY;
 #endif
 
     uint32_t meshCount = m_Model.m_Header.meshCount;
@@ -927,10 +933,10 @@ void DxrMsaaDemo::createAABBs()
         }
     }
 
-    m_ModelAABBs.Create(L"AABBs", uint32_t(aabbs.size()), sizeof(D3D12_RAYTRACING_AABB), aabbs.data());
+    aabbBuffer.Create(L"AABBs", uint32_t(aabbs.size()), sizeof(D3D12_RAYTRACING_AABB), aabbs.data());
 }
 
-void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
+void DxrMsaaDemo::createBvh(BVH &bvh, bool useAABBs, StructuredBuffer* aabbBuffer)
 {
     uint32_t meshCount = m_Model.m_Header.meshCount;
 
@@ -949,7 +955,7 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
     {
         const Model::Mesh &mesh = m_Model.m_pMesh[m];
 
-        if (triangles)
+        if (!useAABBs)
         {
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
             geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
@@ -965,22 +971,22 @@ void DxrMsaaDemo::createBvh(BVH &bvh, bool triangles)
         }
         else
         {
-            uint32_t stride = m_ModelAABBs.GetElementSize();
+            uint32_t stride = aabbBuffer->GetElementSize();
             uint32_t triCount = mesh.indexCount / 3;
             uint32_t aabbCount = (triCount + TRIS_PER_AABB - 1) / TRIS_PER_AABB;
 
             geoDesc[m].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
             geoDesc[m].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION;
             geoDesc[m].AABBs.AABBCount = aabbCount;
-            geoDesc[m].AABBs.AABBs.StartAddress = m_ModelAABBs.GetGpuVirtualAddress() + aabbTotal * stride;
+            geoDesc[m].AABBs.AABBs.StartAddress = aabbBuffer->GetGpuVirtualAddress() + aabbTotal * stride;
             geoDesc[m].AABBs.AABBs.StrideInBytes = stride;
 
             aabbTotal += aabbCount;
         }
     }
-    if (!triangles)
+    if (useAABBs)
     {
-        ASSERT(aabbTotal == m_ModelAABBs.GetElementCount());
+        ASSERT(aabbTotal == aabbBuffer->GetElementCount());
     }
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC bottomDesc = {};
@@ -1162,11 +1168,85 @@ m_Model.m_Header.meshCount -= 1;
         }
     }
 
+    // acceleration structure for primary beams
     // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
-    createAABBs();
+    {
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+        float camPosX = m_Camera.GetPosition().GetX();
+        float camPosY = m_Camera.GetPosition().GetY();
+        float camPosZ = m_Camera.GetPosition().GetZ();
+
+        float camRightX = m_Camera.GetRightVec().GetX();
+        float camRightY = m_Camera.GetRightVec().GetY();
+        float camRightZ = m_Camera.GetRightVec().GetZ();
+
+        float camUpX = m_Camera.GetUpVec().GetX();
+        float camUpY = m_Camera.GetUpVec().GetY();
+        float camUpZ = m_Camera.GetUpVec().GetZ();
+
+        float camForwardX = m_Camera.GetForwardVec().GetX();
+        float camForwardY = m_Camera.GetForwardVec().GetY();
+        float camForwardZ = m_Camera.GetForwardVec().GetZ();
+
+        float camFoV = m_Camera.GetFOV();
+        float camAspect = float(g_SceneColorBuffer.GetWidth()) / g_SceneColorBuffer.GetHeight();
+#endif
+        createAABBs(
+            m_ModelAABBs_primary
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+            , camPosX, camPosY, camPosZ
+            , camRightX, camRightY, camRightZ
+            , camUpX, camUpY, camUpZ
+            , camForwardX, camForwardY, camForwardZ
+            , camFoV
+            , camAspect
+            , m_tilesX, m_tilesY
+#endif
+        );
+    }
+
+    // acceleration structure for shadow beams
+    {
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+        // For the purpose of enlarging AABBs, we need to know an origin point for the beams...
+        // Unlike camera primary rays, there isn't a single point we can use for shadows, so just
+        // pick something in the middle of the floor.
+        float camPosX = 0.0f;
+        float camPosY = 0.0f;
+        float camPosZ = 0.0f;
+
+        float camRightX = -1;
+        float camRightY = 0;
+        float camRightZ = 0;
+
+        float camUpX = 0;
+        float camUpY = 0;
+        float camUpZ = 1;
+
+        float camForwardX = 0;
+        float camForwardY = -1;
+        float camForwardZ = 0;
+
+        float camFoV = 2.0f * atan(AREA_LIGHT_EXTENT.z / (AREA_LIGHT_CENTER.y - camPosY));
+        float camAspect = AREA_LIGHT_EXTENT.x / AREA_LIGHT_EXTENT.z;
+#endif
+        createAABBs(
+            m_ModelAABBs_shadow
+#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+            , camPosX, camPosY, camPosZ
+            , camRightX, camRightY, camRightZ
+            , camUpX, camUpY, camUpZ
+            , camForwardX, camForwardY, camForwardZ
+            , camFoV
+            , camAspect
+            , 1, 1
+#endif
+        );
+    }
     
-    createBvh(g_bvhTriangles, true);
-    createBvh(g_bvhAABBs, false);
+    createBvh(g_bvhTriangles, false, nullptr);
+    createBvh(g_bvhAABBs_primary, true, &m_ModelAABBs_primary);
+    createBvh(g_bvhAABBs_shadow, true, &m_ModelAABBs_shadow);
 
     InitializeViews();
     InitializeRaytracingStateObjects();
@@ -1450,6 +1530,7 @@ void DxrMsaaDemo::RaytraceDiffuse(
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(3, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhTriangles.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Ray.GetDispatchRayDesc(colorTarget.GetWidth(), colorTarget.GetHeight());
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Ray.m_pPSO);
@@ -1506,7 +1587,8 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pCommandList->SetComputeRootConstantBufferView(1, g_shadeConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(3, g_OutputUAV);
-    pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhAABBs.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhAABBs_primary.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(
         m_tilesX, m_tilesY);

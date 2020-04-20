@@ -168,6 +168,7 @@ static const float FLT_MAX = asfloat(0x7F7FFFFF);
 # endif
 
 RaytracingAccelerationStructure g_accel : register(t0);
+RaytracingAccelerationStructure g_accelShadow : register(t20);
 
 StructuredBuffer<RayTraceMeshInfo> g_meshInfo : register(t1);
 ByteAddressBuffer g_indices : register(t2);

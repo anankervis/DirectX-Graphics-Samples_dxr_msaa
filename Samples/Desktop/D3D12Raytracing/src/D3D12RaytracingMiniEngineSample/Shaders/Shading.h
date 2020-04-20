@@ -29,6 +29,9 @@
 // smaller numbers to scale the area light extents down, to create harder shadows
 #define SHADOW_AREA_LIGHT_SCALE .01f
 
+#define AREA_LIGHT_CENTER float3(-61, 1296, -38)
+#define AREA_LIGHT_EXTENT (float3(907 * SHADOW_AREA_LIGHT_SCALE, 0 * SHADOW_AREA_LIGHT_SCALE, 189 * SHADOW_AREA_LIGHT_SCALE))
+
 STRUCT_ALIGN(16) struct ShadeConstants
 {
     float3 sunDirection; uint pad0;
@@ -39,9 +42,6 @@ STRUCT_ALIGN(16) struct ShadeConstants
 #ifdef HLSL
 
 # if SHADOW_MODE == SHADOW_MODE_SOFT
-# define AREA_LIGHT_CENTER float3(-61, 1296, -38)
-# define AREA_LIGHT_EXTENT (float3(907, 0, 189) * SHADOW_AREA_LIGHT_SCALE)
-
 float2 shadowRandom(uint2 p, uint sampleIndex)
 {
     uint x = sampleIndex * 1704635963 + p.x * 2704612033 + p.y * 3704636251;
