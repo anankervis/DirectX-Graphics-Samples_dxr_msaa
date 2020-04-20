@@ -90,7 +90,9 @@ struct BVH
 };
 BVH g_bvhTriangles;
 BVH g_bvhAABBs_primary;
+#if SHADOW_MODE == SHADOW_MODE_BEAM
 BVH g_bvhAABBs_shadow;
+#endif
 
 CComPtr<ID3D12RootSignature> g_GlobalRaytracingRootSignature;
 CComPtr<ID3D12RootSignature> g_LocalRaytracingRootSignature;
@@ -259,7 +261,9 @@ private:
 
     Model m_Model;
     StructuredBuffer m_ModelAABBs_primary;
+#if SHADOW_MODE == SHADOW_MODE_BEAM
     StructuredBuffer m_ModelAABBs_shadow;
+#endif
 
     uint32_t m_tilesX;
     uint32_t m_tilesY;
@@ -656,7 +660,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     {
         D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig;
         pipelineConfig.MaxTraceRecursionDepth = 1;
-#if SHADOW_MODE
+#if SHADOW_MODE != SHADOW_MODE_NONE
         pipelineConfig.MaxTraceRecursionDepth += 1;
 #endif
 
@@ -1168,6 +1172,9 @@ m_Model.m_Header.meshCount -= 1;
         }
     }
 
+    // ray vs triangle acceleration structure
+    createBvh(g_bvhTriangles, false, nullptr);
+
     // acceleration structure for primary beams
     // for EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT, this must come after setting up the camera transform and tile counts
     {
@@ -1203,11 +1210,14 @@ m_Model.m_Header.meshCount -= 1;
             , m_tilesX, m_tilesY
 #endif
         );
+
+        createBvh(g_bvhAABBs_primary, true, &m_ModelAABBs_primary);
     }
 
+#if SHADOW_MODE == SHADOW_MODE_BEAM
     // acceleration structure for shadow beams
     {
-#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+# if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
         // For the purpose of enlarging AABBs, we need to know an origin point for the beams...
         // Unlike camera primary rays, there isn't a single point we can use for shadows, so just
         // pick something in the middle of the floor.
@@ -1229,10 +1239,10 @@ m_Model.m_Header.meshCount -= 1;
 
         float camFoV = 2.0f * atan(AREA_LIGHT_EXTENT.z / (AREA_LIGHT_CENTER.y - camPosY));
         float camAspect = AREA_LIGHT_EXTENT.x / AREA_LIGHT_EXTENT.z;
-#endif
+# endif
         createAABBs(
             m_ModelAABBs_shadow
-#if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
+# if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
             , camPosX, camPosY, camPosZ
             , camRightX, camRightY, camRightZ
             , camUpX, camUpY, camUpZ
@@ -1240,13 +1250,12 @@ m_Model.m_Header.meshCount -= 1;
             , camFoV
             , camAspect
             , 1, 1
-#endif
+# endif
         );
+
+        createBvh(g_bvhAABBs_shadow, true, &m_ModelAABBs_shadow);
     }
-    
-    createBvh(g_bvhTriangles, false, nullptr);
-    createBvh(g_bvhAABBs_primary, true, &m_ModelAABBs_primary);
-    createBvh(g_bvhAABBs_shadow, true, &m_ModelAABBs_shadow);
+#endif
 
     InitializeViews();
     InitializeRaytracingStateObjects();
@@ -1530,7 +1539,9 @@ void DxrMsaaDemo::RaytraceDiffuse(
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(3, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhTriangles.top->GetGPUVirtualAddress());
+#if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+#endif
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Ray.GetDispatchRayDesc(colorTarget.GetWidth(), colorTarget.GetHeight());
     pRaytracingCommandList->SetPipelineState1(g_RaytracingInputs_Ray.m_pPSO);
@@ -1588,7 +1599,9 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pCommandList->SetComputeRootConstantBufferView(2, g_dynamicConstantBuffer.GetGpuVirtualAddress());
     pCommandList->SetComputeRootDescriptorTable(3, g_OutputUAV);
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhAABBs_primary.top->GetGPUVirtualAddress());
+#if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+#endif
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(
         m_tilesX, m_tilesY);

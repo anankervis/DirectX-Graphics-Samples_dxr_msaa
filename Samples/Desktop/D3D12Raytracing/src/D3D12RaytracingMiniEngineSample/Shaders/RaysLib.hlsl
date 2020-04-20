@@ -24,7 +24,7 @@ cbuffer b0 : register(b0)
     ShadeConstants shadeConstants;
 };
 
-#if SHADOW_MODE
+#if SHADOW_MODE != SHADOW_MODE_NONE
 struct ShadowPayload
 {
     float opacity;
@@ -102,12 +102,30 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float3 viewDir = normalize(rayDir);
     float specularMask = .1; // TODO: read the texture
 
-#if SHADOW_MODE
+#if SHADOW_MODE != SHADOW_MODE_NONE
+    uint shadowSampleCount = SHADOW_SAMPLES;
+
+# if SHADOW_MODE == SHADOW_MODE_SOFT
+    float3 shadowTarget = AREA_LIGHT_CENTER;
+
+    // for soft shadows, scale the sample count by the area we're integrating over
+    /*{
+        float area = AREA_LIGHT_EXTENT.x * AREA_LIGHT_EXTENT.z;
+        float distance = max(.01f, length(shadowTarget - tri.worldPos));
+
+        float projectedArea = area / distance;
+
+        float samples = projectedArea * 100.0f;
+
+        shadowSampleCount = clamp(uint(samples + .5), 1, SHADOW_SAMPLES);
+    }*/
+# endif
+
     float shadow = 1.0f;
-    for (uint shadowSampleIndex = 0; shadowSampleIndex < SHADOW_SAMPLES; shadowSampleIndex++)
+    for (uint shadowSampleIndex = 0; shadowSampleIndex < shadowSampleCount; shadowSampleIndex++)
     {
         ShadowPayload shadowPayload;
-        shadowPayload.opacity = 1.0f / SHADOW_SAMPLES;
+        shadowPayload.opacity = 1.0f / shadowSampleCount;
 
 #if SHADOW_MODE == SHADOW_MODE_SOFT
         // soft shadows
@@ -117,11 +135,11 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         // seed = pixel coord, sample index, shadow sample index
         float2 st = shadowRandom(DispatchRaysIndex().xy, (sampleIndex << SHADOW_SAMPLES_LOG2) | shadowSampleIndex);
 
-        float3 shadowTarget = AREA_LIGHT_CENTER;
-        shadowTarget += float3(st.x, 0, 0) * (AREA_LIGHT_EXTENT).x;
-        shadowTarget += float3(0, 0, st.y) * (AREA_LIGHT_EXTENT).z;
+        float3 shadowSampleTarget = shadowTarget;
+        shadowSampleTarget += float3(st.x, 0, 0) * (AREA_LIGHT_EXTENT).x;
+        shadowSampleTarget += float3(0, 0, st.y) * (AREA_LIGHT_EXTENT).z;
 
-        float3 shadowRayDir = normalize(shadowTarget - tri.worldPos);
+        float3 shadowRayDir = normalize(shadowSampleTarget - tri.worldPos);
 #else
         // hard shadows
         // use the directional light
