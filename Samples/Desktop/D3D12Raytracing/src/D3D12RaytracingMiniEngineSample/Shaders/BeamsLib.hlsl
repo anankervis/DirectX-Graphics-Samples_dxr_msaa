@@ -7,7 +7,7 @@
 
 // Record the triangle and move on. We'll compute coverage later.
 [shader("anyhit")]
-void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
+void AnyHitPrimary(inout BeamPayload payload, in BeamHitAttribs attr)
 {
     PERF_COUNTER(anyHitCount, 1);
 
@@ -30,7 +30,7 @@ void AnyHit(inout BeamPayload payload, in BeamHitAttribs attr)
 }
 
 [shader("intersection")]
-void Intersection()
+void IntersectionPrimary()
 {
     PERF_COUNTER(intersectCount, 1);
 
@@ -125,7 +125,7 @@ void Intersection()
 }
 
 [shader("miss")]
-void Miss(inout BeamPayload payload)
+void MissPrimary(inout BeamPayload payload)
 {
     PERF_COUNTER(missCount, 1);
 }
@@ -148,5 +148,5 @@ void RayGen()
 
     BeamPayload payload;
 
-    TraceRay(g_accel, RAY_FLAG_NONE, ~0, 0, 1, 0, rayDesc, payload);
+    TraceRay(g_accel, RAY_FLAG_NONE, ~0, HIT_GROUP_PRIMARY, 1, 0, rayDesc, payload);
 }

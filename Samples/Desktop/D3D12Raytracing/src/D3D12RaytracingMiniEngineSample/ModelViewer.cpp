@@ -527,7 +527,8 @@ D3D12_STATE_SUBOBJECT CreateDxilLibrary(LPCWSTR entrypoint, const void *pShaderB
 
 void SetPipelineStateStackSize(
     LPCWSTR raygenExportName,
-    LPCWSTR closestHitExportName,
+    LPCWSTR *hitExportName,
+    uint32_t hitShaderCount,
     LPCWSTR *missExportName,
     uint32_t missShaderCount,
     UINT maxRecursion,
@@ -540,7 +541,11 @@ void SetPipelineStateStackSize(
 
     UINT64 raygenStackSize = stateObjectProperties->GetShaderStackSize(raygenExportName);
 
-    UINT64 closestHitStackSize = stateObjectProperties->GetShaderStackSize(closestHitExportName);
+    UINT64 closestHitStackSize = 0;
+    for (uint32_t n = 0; n < hitShaderCount; n++)
+    {
+        closestHitStackSize = std::max(closestHitStackSize, stateObjectProperties->GetShaderStackSize(hitExportName[n]));
+    }
 
     UINT64 missStackSize = 0;
     for (uint32_t n = 0; n < missShaderCount; n++)
@@ -620,13 +625,32 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     D3D12SerializeVersionedRootSignature(&localRootSignatureDesc, &pLocalRootSignatureBlob, nullptr);
     g_pRaytracingDevice->CreateRootSignature(0, pLocalRootSignatureBlob->GetBufferPointer(), pLocalRootSignatureBlob->GetBufferSize(), IID_PPV_ARGS(&g_LocalRaytracingRootSignature));
 
+    LPCWSTR exportName_HitGroup[HIT_GROUP_COUNT];
+    exportName_HitGroup[HIT_GROUP_PRIMARY] =    L"HitGroupPrimary";
+    exportName_HitGroup[HIT_GROUP_SHADOW] =     L"HitGroupShadow";
+
     LPCWSTR exportName_RayGen = L"RayGen";
-    LPCWSTR exportName_Intersection = L"Intersection";
-    LPCWSTR exportName_AnyHit = L"AnyHit";
-    LPCWSTR exportName_Hit = L"Hit";
-    LPCWSTR exportName_Miss = L"Miss";
-    LPCWSTR exportName_MissShadow = L"MissShadow";
-    LPCWSTR exportName_HitGroup = L"HitGroup";
+
+    LPCWSTR exportName_Intersection[HIT_GROUP_COUNT];
+    exportName_Intersection[HIT_GROUP_PRIMARY] = L"IntersectionPrimary";
+    exportName_Intersection[HIT_GROUP_SHADOW] =  L"IntersectionShadow";
+
+    LPCWSTR exportName_AnyHit[HIT_GROUP_COUNT];
+    exportName_AnyHit[HIT_GROUP_PRIMARY] = L"AnyHitPrimary";
+    exportName_AnyHit[HIT_GROUP_SHADOW] = L"AnyHitShadow";
+
+    LPCWSTR exportName_Hit[HIT_GROUP_COUNT];
+    exportName_Hit[HIT_GROUP_PRIMARY] = L"HitPrimary";
+    exportName_Hit[HIT_GROUP_SHADOW] =  L"HitShadow";
+
+    WCHAR exportName_Hit_Scoped[HIT_GROUP_COUNT][128];
+    swprintf_s(exportName_Hit_Scoped[HIT_GROUP_PRIMARY], L"%s::closesthit", exportName_HitGroup[HIT_GROUP_PRIMARY]);
+    swprintf_s(exportName_Hit_Scoped[HIT_GROUP_SHADOW],  L"%s::closesthit", exportName_HitGroup[HIT_GROUP_SHADOW]);
+
+    // technically, miss shaders are not tied to hit groups, so I can have however many of these as I need and index them separately
+    LPCWSTR exportName_Miss[HIT_GROUP_COUNT];
+    exportName_Miss[HIT_GROUP_PRIMARY] =    L"MissPrimary";
+    exportName_Miss[HIT_GROUP_SHADOW] =     L"MissShadow";
 
     UINT nodeMask = 1;
 
@@ -636,23 +660,29 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     const UINT shaderRecordSizeInBytes = ALIGN(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, offsetToMaterialConstants + sizeof(MaterialRootConstant));
     
     uint32_t meshCount = m_Model.m_Header.meshCount;
-    std::vector<byte> pHitShaderTable(shaderRecordSizeInBytes * meshCount);
+    std::vector<byte> pHitShaderTable(meshCount * shaderRecordSizeInBytes * HIT_GROUP_COUNT);
     auto GetShaderTable = [=](const Model &model, ID3D12StateObject *pPSO, byte *pShaderTable)
     {
         ID3D12StateObjectProperties* stateObjectProperties = nullptr;
         ThrowIfFailed(pPSO->QueryInterface(IID_PPV_ARGS(&stateObjectProperties)));
-        void *pHitGroupIdentifierData = stateObjectProperties->GetShaderIdentifier(exportName_HitGroup);
-        for (UINT i = 0; i < meshCount; i++)
+        for (uint32_t i = 0; i < meshCount; i++)
         {
-            byte *pShaderRecord = i * shaderRecordSizeInBytes + pShaderTable;
-            memcpy(pShaderRecord, pHitGroupIdentifierData, shaderIdentifierSize);
+            for (uint32_t h = 0; h < HIT_GROUP_COUNT; h++)
+            {
+                byte *pShaderRecord = pShaderTable + (i * HIT_GROUP_COUNT + h) * shaderRecordSizeInBytes;
 
-            UINT materialIndex = model.m_pMesh[i].materialIndex;
-            memcpy(pShaderRecord + offsetToDescriptorHandle, &g_GpuSceneMaterialSrvs[materialIndex].ptr, sizeof(g_GpuSceneMaterialSrvs[materialIndex].ptr));
+                void *pHitGroupIdentifierData = stateObjectProperties->GetShaderIdentifier(exportName_HitGroup[h]);
+                memcpy(pShaderRecord, pHitGroupIdentifierData, shaderIdentifierSize);
 
-            MaterialRootConstant material;
-            material.MaterialID = i;
-            memcpy(pShaderRecord + offsetToMaterialConstants, &material, sizeof(material));
+                UINT materialIndex = model.m_pMesh[i].materialIndex;
+                memcpy(pShaderRecord + offsetToDescriptorHandle,
+                    &g_GpuSceneMaterialSrvs[materialIndex].ptr,
+                    sizeof(g_GpuSceneMaterialSrvs[materialIndex].ptr));
+
+                MaterialRootConstant material;
+                material.MaterialID = i;
+                memcpy(pShaderRecord + offsetToMaterialConstants, &material, sizeof(material));
+            }
         }
     };
 
@@ -670,10 +700,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
         D3D12_EXPORT_DESC exportDesc[] =
         {
-            { exportName_RayGen,        nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Hit,           nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Miss,          nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_MissShadow,    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_RayGen,                    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Hit[HIT_GROUP_PRIMARY],    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss[HIT_GROUP_PRIMARY],   nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss[HIT_GROUP_SHADOW],    nullptr, D3D12_EXPORT_FLAG_NONE },
         };
         D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
         {
@@ -685,10 +715,18 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             exportDesc // pExports
         };
 
-        D3D12_HIT_GROUP_DESC hitGroupDesc = {};
-        hitGroupDesc.HitGroupExport = exportName_HitGroup;
-        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-        hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
+        D3D12_HIT_GROUP_DESC hitGroupDesc[HIT_GROUP_COUNT] = {};
+        hitGroupDesc[HIT_GROUP_PRIMARY].HitGroupExport = exportName_HitGroup[HIT_GROUP_PRIMARY];
+        hitGroupDesc[HIT_GROUP_PRIMARY].Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+        hitGroupDesc[HIT_GROUP_PRIMARY].ClosestHitShaderImport = exportName_Hit[HIT_GROUP_PRIMARY];
+
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+        hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
+        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+#else
+        hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
+        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+#endif
 
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
@@ -697,7 +735,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
             { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
-            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, hitGroupDesc + 0 },
+#if HIT_GROUP_COUNT > 1
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, hitGroupDesc + 1 },
+#endif
             { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
         };
         D3D12_STATE_OBJECT_DESC stateObjectDesc =
@@ -707,10 +748,15 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             stateSubobjects
         };
 
-        LPCWSTR missShaderNames[] =
+        LPCWSTR hitShaderSymbols[] =
         {
-            exportName_Miss,
-            exportName_MissShadow,
+            exportName_Hit_Scoped[HIT_GROUP_PRIMARY],
+        };
+
+        LPCWSTR missShaderSymbols[] =
+        {
+            exportName_Miss[HIT_GROUP_PRIMARY],
+            exportName_Miss[HIT_GROUP_SHADOW],
         };
 
         CComPtr<ID3D12StateObject> pDiffusePSO;
@@ -723,14 +769,12 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             shaderRecordSizeInBytes,
             (UINT)pHitShaderTable.size(),
             exportName_RayGen,
-            missShaderNames, _countof(missShaderNames));
+            missShaderSymbols, _countof(missShaderSymbols));
 
-        WCHAR hitGroupExportNameClosestHitType[64];
-        swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
         SetPipelineStateStackSize(
             exportName_RayGen,
-            hitGroupExportNameClosestHitType,
-            missShaderNames, _countof(missShaderNames),
+            hitShaderSymbols, _countof(hitShaderSymbols),
+            missShaderSymbols, _countof(missShaderSymbols),
             pipelineConfig.MaxTraceRecursionDepth,
             g_RaytracingInputs_Ray.m_pPSO);
     }
@@ -746,11 +790,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
         D3D12_EXPORT_DESC exportDesc[] =
         {
-            { exportName_RayGen, nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Intersection, nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_AnyHit, nullptr, D3D12_EXPORT_FLAG_NONE },
-//            { exportName_Hit,    nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Miss,   nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_RayGen,                            nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Intersection[HIT_GROUP_PRIMARY],   nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_AnyHit[HIT_GROUP_PRIMARY],         nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss[HIT_GROUP_PRIMARY],           nullptr, D3D12_EXPORT_FLAG_NONE },
         };
         D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
         {
@@ -762,12 +805,19 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             exportDesc // pExports
         };
 
-        D3D12_HIT_GROUP_DESC hitGroupDesc = {};
-        hitGroupDesc.HitGroupExport = exportName_HitGroup;
-        hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
-        hitGroupDesc.AnyHitShaderImport = exportName_AnyHit;
-//        hitGroupDesc.ClosestHitShaderImport = exportName_Hit;
-        hitGroupDesc.IntersectionShaderImport = exportName_Intersection;
+        D3D12_HIT_GROUP_DESC hitGroupDesc[HIT_GROUP_COUNT] = {};
+        hitGroupDesc[HIT_GROUP_PRIMARY].HitGroupExport = exportName_HitGroup[HIT_GROUP_PRIMARY];
+        hitGroupDesc[HIT_GROUP_PRIMARY].Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+        hitGroupDesc[HIT_GROUP_PRIMARY].AnyHitShaderImport = exportName_AnyHit[HIT_GROUP_PRIMARY];
+        hitGroupDesc[HIT_GROUP_PRIMARY].IntersectionShaderImport = exportName_Intersection[HIT_GROUP_PRIMARY];
+
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+        hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
+        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+#else
+        hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
+        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+#endif
 
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
@@ -776,7 +826,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &pipelineConfig },
             { D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &dxilLibDesc },
             { D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shaderConfig },
-            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, &hitGroupDesc },
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, hitGroupDesc + 0 },
+#if HIT_GROUP_COUNT > 1
+            { D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, hitGroupDesc + 1 },
+#endif
             { D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &g_LocalRaytracingRootSignature.p },
         };
         D3D12_STATE_OBJECT_DESC stateObjectDesc =
@@ -786,9 +839,15 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             stateSubobjects
         };
 
-        LPCWSTR missShaderNames[] =
+        LPCWSTR hitShaderSymbols[] =
         {
-            exportName_Miss,
+            exportName_Hit_Scoped[HIT_GROUP_PRIMARY],
+        };
+
+        LPCWSTR missShaderSymbols[] =
+        {
+            exportName_Miss[HIT_GROUP_PRIMARY],
+            //exportName_Miss[HIT_GROUP_SHADOW],
         };
 
         CComPtr<ID3D12StateObject> pBeamsPSO;
@@ -801,14 +860,12 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
             shaderRecordSizeInBytes,
             (UINT)pHitShaderTable.size(),
             exportName_RayGen,
-            missShaderNames, _countof(missShaderNames));
+            missShaderSymbols, _countof(missShaderSymbols));
 
-        WCHAR hitGroupExportNameClosestHitType[64];
-        swprintf_s(hitGroupExportNameClosestHitType, L"%s::closesthit", exportName_HitGroup);
         SetPipelineStateStackSize(
             exportName_RayGen,
-            hitGroupExportNameClosestHitType,
-            missShaderNames, _countof(missShaderNames),
+            hitShaderSymbols, _countof(hitShaderSymbols),
+            missShaderSymbols, _countof(missShaderSymbols),
             pipelineConfig.MaxTraceRecursionDepth,
             g_RaytracingInputs_Beam.m_pPSO);
     }
@@ -1541,6 +1598,8 @@ void DxrMsaaDemo::RaytraceDiffuse(
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhTriangles.top->GetGPUVirtualAddress());
 #if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+#else
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 #endif
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Ray.GetDispatchRayDesc(colorTarget.GetWidth(), colorTarget.GetHeight());
@@ -1601,6 +1660,8 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhAABBs_primary.top->GetGPUVirtualAddress());
 #if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+#else
+    pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 #endif
 
     D3D12_DISPATCH_RAYS_DESC dispatchRaysDesc = g_RaytracingInputs_Beam.GetDispatchRayDesc(

@@ -24,7 +24,6 @@ cbuffer b0 : register(b0)
     ShadeConstants shadeConstants;
 };
 
-#if SHADOW_MODE != SHADOW_MODE_NONE
 struct ShadowPayload
 {
     float opacity;
@@ -37,10 +36,9 @@ void MissShadow(inout ShadowPayload payload)
 
     payload.opacity *= 0.0f;
 }
-#endif
 
 [shader("closesthit")]
-void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
     PERF_COUNTER(closestHitCount, 1);
 
@@ -103,13 +101,12 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
     float specularMask = .1; // TODO: read the texture
 
 #if SHADOW_MODE != SHADOW_MODE_NONE
-    uint shadowSampleCount = SHADOW_SAMPLES;
-
-# if SHADOW_MODE == SHADOW_MODE_SOFT
     float3 shadowTarget = AREA_LIGHT_CENTER;
 
+    uint shadowSampleCount = SHADOW_SAMPLES;
+/*# if SHADOW_MODE == SHADOW_MODE_SOFT
     // for soft shadows, scale the sample count by the area we're integrating over
-    /*{
+    {
         float area = AREA_LIGHT_EXTENT.x * AREA_LIGHT_EXTENT.z;
         float distance = max(.01f, length(shadowTarget - tri.worldPos));
 
@@ -118,8 +115,8 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         float samples = projectedArea * 100.0f;
 
         shadowSampleCount = clamp(uint(samples + .5), 1, SHADOW_SAMPLES);
-    }*/
-# endif
+    }
+# endif*/
 
     float shadow = 1.0f;
     for (uint shadowSampleIndex = 0; shadowSampleIndex < shadowSampleCount; shadowSampleIndex++)
@@ -140,6 +137,10 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         shadowSampleTarget += float3(0, 0, st.y) * (AREA_LIGHT_EXTENT).z;
 
         float3 shadowRayDir = normalize(shadowSampleTarget - tri.worldPos);
+#elif SHADOW_MODE == SHADOW_MODE_BEAM
+        // soft beam shadows
+        // use the area light center
+        float3 shadowRayDir = normalize(shadowTarget - tri.worldPos);
 #else
         // hard shadows
         // use the directional light
@@ -159,9 +160,9 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         PERF_COUNTER(shadowLaunchCount, 1);
         uint missShaderIndex = 1;
         TraceRay(
-            g_accel,
+            g_accelShadow,
             RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-            ~0, 0, 1, missShaderIndex,
+            ~0, HIT_GROUP_SHADOW, 1, missShaderIndex,
             shadowRayDesc, shadowPayload);
 
         shadow -= shadowPayload.opacity;
@@ -181,13 +182,13 @@ void Hit(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr
         shadeConstants.sunDirection,
         shadeConstants.sunColor,
         shadow);
-outputColor = float3(shadow, shadow, shadow);
+//outputColor = float3(shadow, shadow, shadow);
 
     payload.color += outputColor;
 }
 
 [shader("miss")]
-void Miss(inout RayPayload payload)
+void MissPrimary(inout RayPayload payload)
 {
     PERF_COUNTER(missCount, 1);
 
@@ -221,7 +222,7 @@ void RayGen()
             FLT_MAX,
         };
 
-        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, rayDesc, payload);
+        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, HIT_GROUP_PRIMARY, 1, 0, rayDesc, payload);
     }
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(payload.color / AA_SAMPLES, 1);
