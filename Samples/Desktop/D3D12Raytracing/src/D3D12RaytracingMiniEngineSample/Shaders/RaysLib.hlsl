@@ -162,7 +162,7 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         TraceRay(
             g_accelShadow,
             RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-            ~0, HIT_GROUP_SHADOW, 1, missShaderIndex,
+            ~0, HIT_GROUP_SHADOW, HIT_GROUP_COUNT, missShaderIndex,
             shadowRayDesc, shadowPayload);
 
         shadow -= shadowPayload.opacity;
@@ -222,7 +222,7 @@ void RayGen()
             FLT_MAX,
         };
 
-        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, HIT_GROUP_PRIMARY, 1, 0, rayDesc, payload);
+        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, HIT_GROUP_PRIMARY, HIT_GROUP_COUNT, 0, rayDesc, payload);
     }
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(payload.color / AA_SAMPLES, 1);
