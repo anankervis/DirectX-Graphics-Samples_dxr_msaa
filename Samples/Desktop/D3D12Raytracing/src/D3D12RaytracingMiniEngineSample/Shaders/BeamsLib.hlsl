@@ -148,5 +148,9 @@ void RayGen()
 
     BeamPayload payload;
 
-    TraceRay(g_accel, RAY_FLAG_NONE, ~0, HIT_GROUP_PRIMARY, HIT_GROUP_COUNT, 0, rayDesc, payload);
+    TraceRay(
+        g_accel,
+        RAY_FLAG_NONE, ~0,
+        HIT_GROUP_PRIMARY, HIT_GROUP_COUNT, HIT_GROUP_PRIMARY,
+        rayDesc, payload);
 }

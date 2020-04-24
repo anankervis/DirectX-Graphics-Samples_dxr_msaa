@@ -700,10 +700,15 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
         D3D12_EXPORT_DESC exportDesc[] =
         {
-            { exportName_RayGen,                    nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Hit[HIT_GROUP_PRIMARY],    nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Miss[HIT_GROUP_PRIMARY],   nullptr, D3D12_EXPORT_FLAG_NONE },
-            { exportName_Miss[HIT_GROUP_SHADOW],    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_RayGen,                            nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Hit[HIT_GROUP_PRIMARY],            nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_Miss[HIT_GROUP_PRIMARY],           nullptr, D3D12_EXPORT_FLAG_NONE },
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+            { exportName_Intersection[HIT_GROUP_SHADOW],    nullptr, D3D12_EXPORT_FLAG_NONE },
+            { exportName_AnyHit[HIT_GROUP_SHADOW],          nullptr, D3D12_EXPORT_FLAG_NONE },
+#else
+            { exportName_Hit[HIT_GROUP_SHADOW],             nullptr, D3D12_EXPORT_FLAG_NONE },
+#endif
         };
         D3D12_DXIL_LIBRARY_DESC dxilLibDesc =
         {
@@ -723,9 +728,12 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 #if SHADOW_MODE == SHADOW_MODE_BEAM
         hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
         hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+        hitGroupDesc[HIT_GROUP_SHADOW].AnyHitShaderImport = exportName_AnyHit[HIT_GROUP_SHADOW];
+        hitGroupDesc[HIT_GROUP_SHADOW].IntersectionShaderImport = exportName_Intersection[HIT_GROUP_SHADOW];
 #else
         hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
         hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+        hitGroupDesc[HIT_GROUP_SHADOW].ClosestHitShaderImport = exportName_Hit[HIT_GROUP_SHADOW];
 #endif
 
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
@@ -751,12 +759,12 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         LPCWSTR hitShaderSymbols[] =
         {
             exportName_Hit_Scoped[HIT_GROUP_PRIMARY],
+            exportName_Hit_Scoped[HIT_GROUP_SHADOW],
         };
 
         LPCWSTR missShaderSymbols[] =
         {
             exportName_Miss[HIT_GROUP_PRIMARY],
-            exportName_Miss[HIT_GROUP_SHADOW],
         };
 
         CComPtr<ID3D12StateObject> pDiffusePSO;
@@ -811,13 +819,10 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         hitGroupDesc[HIT_GROUP_PRIMARY].AnyHitShaderImport = exportName_AnyHit[HIT_GROUP_PRIMARY];
         hitGroupDesc[HIT_GROUP_PRIMARY].IntersectionShaderImport = exportName_Intersection[HIT_GROUP_PRIMARY];
 
-#if SHADOW_MODE == SHADOW_MODE_BEAM
+        // TODO... beam emulation would require shooting rays from the final shading compute shader, not from the
+        // ray launch state object.
+        hitGroupDesc[HIT_GROUP_SHADOW] = hitGroupDesc[HIT_GROUP_PRIMARY];
         hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
-        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
-#else
-        hitGroupDesc[HIT_GROUP_SHADOW].HitGroupExport = exportName_HitGroup[HIT_GROUP_SHADOW];
-        hitGroupDesc[HIT_GROUP_SHADOW].Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-#endif
 
         D3D12_STATE_SUBOBJECT stateSubobjects[] =
         {
@@ -847,7 +852,6 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
         LPCWSTR missShaderSymbols[] =
         {
             exportName_Miss[HIT_GROUP_PRIMARY],
-            //exportName_Miss[HIT_GROUP_SHADOW],
         };
 
         CComPtr<ID3D12StateObject> pBeamsPSO;
@@ -1765,7 +1769,9 @@ void DxrMsaaDemo::RenderUI(class GraphicsContext& gfxContext)
     PRINT_COUNTER(shadeQuads);
 
     PRINT_COUNTER(shadowLaunchCount);
-    PRINT_COUNTER(shadowMissCount);
+    PRINT_COUNTER(shadowHitCount);
+    PRINT_COUNTER(shadowBeamIntersectCount);
+    PRINT_COUNTER(shadowBeamAnyHitCount);
 
 # undef PRINT_COUNTER
 

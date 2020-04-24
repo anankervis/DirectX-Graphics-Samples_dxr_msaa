@@ -29,13 +29,39 @@ struct ShadowPayload
     float opacity;
 };
 
-[shader("miss")]
-void MissShadow(inout ShadowPayload payload)
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+struct ShadowHitAttribs
 {
-    PERF_COUNTER(shadowMissCount, 1);
+};
 
-    payload.opacity *= 0.0f;
+[shader("anyhit")]
+void AnyHitShadow(inout ShadowPayload payload, in ShadowHitAttribs attr)
+{
+    PERF_COUNTER(shadowBeamAnyHitCount, 1);
+
+    payload.opacity += .05f;
 }
+
+[shader("intersection")]
+void IntersectionShadow()
+{
+    PERF_COUNTER(shadowBeamIntersectCount, 1);
+
+    float tMax = RayTCurrent();
+
+    ShadowHitAttribs hit;
+
+    ReportHit(tMax, 0, hit);
+}
+#else
+[shader("closesthit")]
+void HitShadow(inout ShadowPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+{
+    PERF_COUNTER(shadowHitCount, 1);
+
+    payload.opacity = 1.0f;
+}
+#endif
 
 [shader("closesthit")]
 void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
@@ -118,11 +144,11 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
     }
 # endif*/
 
-    float shadow = 1.0f;
+    float opacity = 0.0f;
     for (uint shadowSampleIndex = 0; shadowSampleIndex < shadowSampleCount; shadowSampleIndex++)
     {
         ShadowPayload shadowPayload;
-        shadowPayload.opacity = 1.0f / shadowSampleCount;
+        shadowPayload.opacity = 0.0f;
 
 #if SHADOW_MODE == SHADOW_MODE_SOFT
         // soft shadows
@@ -148,6 +174,10 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         float3 shadowRayDir = shadeConstants.sunDirection;
 #endif
 
+        // ray would shoot away from the area light
+        if (dot(shadowRayDir, normal) <= 0.0f)
+            continue;
+
         float tMin = .01f;
         RayDesc shadowRayDesc =
         {
@@ -158,15 +188,20 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         };
 
         PERF_COUNTER(shadowLaunchCount, 1);
-        uint missShaderIndex = 1;
         TraceRay(
             g_accelShadow,
-            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
-            ~0, HIT_GROUP_SHADOW, HIT_GROUP_COUNT, missShaderIndex,
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+            RAY_FLAG_NONE,
+#else
+            RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+#endif
+            ~0,
+            HIT_GROUP_SHADOW, HIT_GROUP_COUNT, HIT_GROUP_SHADOW,
             shadowRayDesc, shadowPayload);
 
-        shadow -= shadowPayload.opacity;
+        opacity += clamp(shadowPayload.opacity, 0.0f, 1.0f);
     }
+    float shadow = 1.0f - opacity / shadowSampleCount;
 #else
     float shadow = 1.0f;
 #endif
@@ -222,7 +257,11 @@ void RayGen()
             FLT_MAX,
         };
 
-        TraceRay(g_accel, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, HIT_GROUP_PRIMARY, HIT_GROUP_COUNT, 0, rayDesc, payload);
+        TraceRay(
+            g_accel,
+            RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0,
+            HIT_GROUP_PRIMARY, HIT_GROUP_COUNT, HIT_GROUP_PRIMARY,
+            rayDesc, payload);
     }
 
     g_screenOutput[DispatchRaysIndex().xy] = float4(payload.color / AA_SAMPLES, 1);

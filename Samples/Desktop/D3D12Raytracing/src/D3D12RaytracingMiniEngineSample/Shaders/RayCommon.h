@@ -9,7 +9,7 @@
 // and this isn't updated as you move the camera around.
 #define EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT 1
 
-#define COLLECT_COUNTERS 0
+#define COLLECT_COUNTERS 1
 
 #define HIT_GROUP_PRIMARY   0
 #define HIT_GROUP_SHADOW    1
@@ -92,7 +92,9 @@ struct Counters
     uint shadeQuads;
 
     uint shadowLaunchCount;
-    uint shadowMissCount;
+    uint shadowHitCount;
+    uint shadowBeamIntersectCount;
+    uint shadowBeamAnyHitCount;
 };
 #if COLLECT_COUNTERS
 # define PERF_COUNTER(counter, value) InterlockedAdd(g_counters[0]. counter, value)

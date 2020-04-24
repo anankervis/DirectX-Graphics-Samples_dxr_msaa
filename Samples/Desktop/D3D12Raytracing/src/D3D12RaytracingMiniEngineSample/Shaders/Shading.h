@@ -15,7 +15,7 @@
 #define SHADOW_MODE_SOFT 2
 #define SHADOW_MODE_BEAM 3
 
-#define SHADOW_MODE SHADOW_MODE_SOFT
+#define SHADOW_MODE SHADOW_MODE_BEAM
 
 // For soft shadow mode, how many extra samples do we take?
 // This is a multiplier on top of the number of AA samples we're already taking.
