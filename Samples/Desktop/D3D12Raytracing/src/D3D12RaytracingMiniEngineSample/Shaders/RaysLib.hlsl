@@ -39,7 +39,12 @@ void AnyHitShadow(inout ShadowPayload payload, in ShadowHitAttribs attr)
 {
     PERF_COUNTER(shadowBeamAnyHitCount, 1);
 
-    payload.opacity += .05f;
+    uint primID = PrimitiveIndex();
+
+// TODO: choose major axis, integrate overlap of beam and aabb
+    float opacity = g_aabbShadow_payload[primID].opacity.x;
+
+    payload.opacity += opacity;
 }
 
 [shader("intersection")]

@@ -167,6 +167,15 @@ struct BeamHitAttribs
     uint triID;
 };
 
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+struct ShadowAABBPayload
+{
+    float3 min;
+    float3 max;
+    float3 opacity; // projection along major axes
+};
+#endif
+
 #ifdef HLSL
 
 # ifndef SINGLE
@@ -174,7 +183,9 @@ static const float FLT_MAX = asfloat(0x7F7FFFFF);
 # endif
 
 RaytracingAccelerationStructure g_accel : register(t0);
+
 RaytracingAccelerationStructure g_accelShadow : register(t20);
+StructuredBuffer<ShadowAABBPayload> g_aabbShadow_payload : register(t21);
 
 StructuredBuffer<RayTraceMeshInfo> g_meshInfo : register(t1);
 ByteAddressBuffer g_indices : register(t2);

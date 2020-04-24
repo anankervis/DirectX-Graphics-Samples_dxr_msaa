@@ -228,6 +228,7 @@ private:
 
     void createAABBs(
         StructuredBuffer& aabbBuffer
+        , StructuredBuffer* aabbPayloadBuffer
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
         , float camPosX, float camPosY, float camPosZ
         , float camRightX, float camRightY, float camRightZ
@@ -263,6 +264,7 @@ private:
     StructuredBuffer m_ModelAABBs_primary;
 #if SHADOW_MODE == SHADOW_MODE_BEAM
     StructuredBuffer m_ModelAABBs_shadow;
+    StructuredBuffer m_ModelAABBs_shadow_payload;
 #endif
 
     uint32_t m_tilesX;
@@ -587,7 +589,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     uavDescriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     uavDescriptorRange.Flags = D3D12_DESCRIPTOR_RANGE_FLAG_NONE;
 
-    CD3DX12_ROOT_PARAMETER1 globalRootSignatureParameters[8];
+    CD3DX12_ROOT_PARAMETER1 globalRootSignatureParameters[9];
     globalRootSignatureParameters[0].InitAsDescriptorTable(1, &sceneBuffersDescriptorRange);
     globalRootSignatureParameters[1].InitAsConstantBufferView(0);
     globalRootSignatureParameters[2].InitAsConstantBufferView(1);
@@ -596,6 +598,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
     globalRootSignatureParameters[5].InitAsUnorderedAccessView(1);
     globalRootSignatureParameters[6].InitAsShaderResourceView(0);
     globalRootSignatureParameters[7].InitAsShaderResourceView(20);
+    globalRootSignatureParameters[8].InitAsShaderResourceView(21);
     auto globalRootSignatureDesc = CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC(
         _countof(globalRootSignatureParameters), globalRootSignatureParameters,
         _countof(staticSamplerDescs), staticSamplerDescs);
@@ -900,6 +903,7 @@ void DxrMsaaDemo::InitializeRaytracingStateObjects()
 
 void DxrMsaaDemo::createAABBs(
     StructuredBuffer& aabbBuffer
+    , StructuredBuffer* aabbPayloadBuffer
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
     , float camPosX, float camPosY, float camPosZ
     , float camRightX, float camRightY, float camRightZ
@@ -922,6 +926,7 @@ void DxrMsaaDemo::createAABBs(
 
     uint32_t meshCount = m_Model.m_Header.meshCount;
     std::vector<D3D12_RAYTRACING_AABB> aabbs;
+    std::vector<ShadowAABBPayload> aabbPayload;
     for (uint32_t m = 0; m < m_Model.m_Header.meshCount; m++)
     {
         const Model::Mesh &mesh = m_Model.m_pMesh[m];
@@ -995,10 +1000,28 @@ void DxrMsaaDemo::createAABBs(
 #endif
 
             aabbs.push_back(aabb);
+
+            ShadowAABBPayload payload;
+            payload.min = float3(
+                aabb.MinX,
+                aabb.MinY,
+                aabb.MinZ);
+            payload.max = float3(
+                aabb.MaxX,
+                aabb.MaxY,
+                aabb.MaxZ);
+            payload.opacity = float3(
+                .05f,
+                .05f,
+                .05f);
+            aabbPayload.push_back(payload);
         }
     }
 
     aabbBuffer.Create(L"AABBs", uint32_t(aabbs.size()), sizeof(D3D12_RAYTRACING_AABB), aabbs.data());
+
+    if (aabbPayloadBuffer)
+        aabbPayloadBuffer->Create(L"AABBs Payload", uint32_t(aabbPayload.size()), sizeof(ShadowAABBPayload), aabbPayload.data());
 }
 
 void DxrMsaaDemo::createBvh(BVH &bvh, bool useAABBs, StructuredBuffer* aabbBuffer)
@@ -1261,6 +1284,7 @@ m_Model.m_Header.meshCount -= 1;
 #endif
         createAABBs(
             m_ModelAABBs_primary
+            , nullptr
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
             , camPosX, camPosY, camPosZ
             , camRightX, camRightY, camRightZ
@@ -1303,6 +1327,7 @@ m_Model.m_Header.meshCount -= 1;
 # endif
         createAABBs(
             m_ModelAABBs_shadow
+            , &m_ModelAABBs_shadow_payload
 # if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
             , camPosX, camPosY, camPosZ
             , camRightX, camRightY, camRightZ
@@ -1602,6 +1627,7 @@ void DxrMsaaDemo::RaytraceDiffuse(
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhTriangles.top->GetGPUVirtualAddress());
 #if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(8, m_ModelAABBs_shadow_payload.GetGpuVirtualAddress());
 #else
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 #endif
@@ -1664,6 +1690,7 @@ void DxrMsaaDemo::RaytraceDiffuseBeams(
     pRaytracingCommandList->SetComputeRootShaderResourceView(6, g_bvhAABBs_primary.top->GetGPUVirtualAddress());
 #if SHADOW_MODE == SHADOW_MODE_BEAM
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhAABBs_shadow.top->GetGPUVirtualAddress());
+    pRaytracingCommandList->SetComputeRootShaderResourceView(8, m_ModelAABBs_shadow_payload.GetGpuVirtualAddress());
 #else
     pRaytracingCommandList->SetComputeRootShaderResourceView(7, g_bvhTriangles.top->GetGPUVirtualAddress());
 #endif
