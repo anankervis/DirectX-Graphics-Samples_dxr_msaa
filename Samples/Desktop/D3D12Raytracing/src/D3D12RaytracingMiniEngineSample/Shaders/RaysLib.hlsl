@@ -27,6 +27,9 @@ cbuffer b0 : register(b0)
 struct ShadowPayload
 {
     float opacity;
+#if SHADOW_MODE == SHADOW_MODE_BEAM
+    float3 beamExtents; // axis-aligned, for this demo
+#endif
 };
 
 #if SHADOW_MODE == SHADOW_MODE_BEAM
@@ -40,11 +43,93 @@ void AnyHitShadow(inout ShadowPayload payload, in ShadowHitAttribs attr)
     PERF_COUNTER(shadowBeamAnyHitCount, 1);
 
     uint primID = PrimitiveIndex();
+    ShadowAABBPayload aabbPayload = g_aabbShadow_payload[primID];
 
-// TODO: choose major axis, integrate overlap of beam and aabb
-    float opacity = g_aabbShadow_payload[primID].opacity.x;
+    float3 rayOrigin = WorldRayOrigin();
+    float3 rayDir = WorldRayDirection();
+    float rayT = RayTCurrent();
 
-    payload.opacity += opacity;
+    float maxMag = max(abs(rayDir.x), max(abs(rayDir.y), abs(rayDir.z)));
+
+    float opacity;
+    float aabbMinA, aabbMinB, aabbMaxA, aabbMaxB;
+    float beamOriginA, beamOriginB;
+    float beamDirA, beamDirB;
+    float beamExtentsA, beamExtentsB;
+    if (abs(rayDir.x) == maxMag)
+    {
+        opacity = aabbPayload.opacity.x;
+
+        aabbMinA = aabbPayload.min.y;
+        aabbMinB = aabbPayload.min.z;
+        aabbMaxA = aabbPayload.max.y;
+        aabbMaxB = aabbPayload.max.z;
+
+        beamOriginA = rayOrigin.y;
+        beamOriginB = rayOrigin.z;
+        beamDirA = rayDir.y;
+        beamDirB = rayDir.z;
+        beamExtentsA = payload.beamExtents.y;
+        beamExtentsB = payload.beamExtents.z;
+    }
+    else if (abs(rayDir.y) == maxMag)
+    {
+        opacity = aabbPayload.opacity.y;
+
+        aabbMinA = aabbPayload.min.x;
+        aabbMinB = aabbPayload.min.z;
+        aabbMaxA = aabbPayload.max.x;
+        aabbMaxB = aabbPayload.max.z;
+
+        beamOriginA = rayOrigin.x;
+        beamOriginB = rayOrigin.z;
+        beamDirA = rayDir.x;
+        beamDirB = rayDir.z;
+        beamExtentsA = payload.beamExtents.x;
+        beamExtentsB = payload.beamExtents.z;
+    }
+    else
+    {
+        opacity = aabbPayload.opacity.z;
+
+        aabbMinA = aabbPayload.min.x;
+        aabbMinB = aabbPayload.min.y;
+        aabbMaxA = aabbPayload.max.x;
+        aabbMaxB = aabbPayload.max.y;
+
+        beamOriginA = rayOrigin.x;
+        beamOriginB = rayOrigin.y;
+        beamDirA = rayDir.x;
+        beamDirB = rayDir.y;
+        beamExtentsA = payload.beamExtents.x;
+        beamExtentsB = payload.beamExtents.y;
+    }
+
+    beamExtentsA *= rayT;
+    beamExtentsB *= rayT;
+    
+    float beamMinA = beamOriginA + beamDirA * rayT - beamExtentsA;
+    float beamMinB = beamOriginB + beamDirB * rayT - beamExtentsB;
+    float beamMaxA = beamOriginA + beamDirA * rayT + beamExtentsA;
+    float beamMaxB = beamOriginB + beamDirB * rayT + beamExtentsB;
+
+    // scale opacity by 2D intersection of beam and box
+    float minA = max(aabbMinA, beamMinA);
+    float minB = max(aabbMinB, beamMinB);
+    float maxA = min(aabbMaxA, beamMaxA);
+    float maxB = min(aabbMaxB, beamMaxB);
+    float dA = max(0.0f, maxA - minA);
+    float dB = max(0.0f, maxB - minB);
+    float areaIntersect = dA * dB;
+
+    float areaBeam = 2.0f * beamExtentsA * 2.0f * beamExtentsB;
+    float areaPercent = areaIntersect / areaBeam;
+
+    payload.opacity += opacity * areaPercent;
+
+    if (payload.opacity >= 1.0f)
+        AcceptHitAndEndSearch();
+    IgnoreHit();
 }
 
 [shader("intersection")]
@@ -52,11 +137,27 @@ void IntersectionShadow()
 {
     PERF_COUNTER(shadowBeamIntersectCount, 1);
 
-    float tMax = RayTCurrent();
+    float3 rayOrigin = WorldRayOrigin();
+    float3 rayDir = WorldRayDirection();
 
-    ShadowHitAttribs hit;
+    uint primID = PrimitiveIndex();
+    ShadowAABBPayload aabbPayload = g_aabbShadow_payload[primID];
 
-    ReportHit(tMax, 0, hit);
+    float3 aabbNPos = float3(
+        rayDir.x >= 0.0f ? aabbPayload.min.x : aabbPayload.max.x,
+        rayDir.y >= 0.0f ? aabbPayload.min.y : aabbPayload.max.y,
+        rayDir.z >= 0.0f ? aabbPayload.min.z : aabbPayload.max.z);
+    float t = dot(rayDir, aabbNPos - rayOrigin);
+
+    if (t <= 0.0f)
+    {
+        // ignore AABBs that contain the ray origin, or come before the origin
+    }
+    else
+    {
+        ShadowHitAttribs hit;
+        ReportHit(t, 0, hit);
+    }
 }
 #else
 [shader("closesthit")]
@@ -133,21 +234,7 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
 
 #if SHADOW_MODE != SHADOW_MODE_NONE
     float3 shadowTarget = AREA_LIGHT_CENTER;
-
     uint shadowSampleCount = SHADOW_SAMPLES;
-/*# if SHADOW_MODE == SHADOW_MODE_SOFT
-    // for soft shadows, scale the sample count by the area we're integrating over
-    {
-        float area = AREA_LIGHT_EXTENT.x * AREA_LIGHT_EXTENT.z;
-        float distance = max(.01f, length(shadowTarget - tri.worldPos));
-
-        float projectedArea = area / distance;
-
-        float samples = projectedArea * 100.0f;
-
-        shadowSampleCount = clamp(uint(samples + .5), 1, SHADOW_SAMPLES);
-    }
-# endif*/
 
     float opacity = 0.0f;
     for (uint shadowSampleIndex = 0; shadowSampleIndex < shadowSampleCount; shadowSampleIndex++)
@@ -172,6 +259,8 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         // soft beam shadows
         // use the area light center
         float3 shadowRayDir = normalize(shadowTarget - tri.worldPos);
+        float areaLightDist = max(.0001f, length(shadowTarget - tri.worldPos));
+        shadowPayload.beamExtents = AREA_LIGHT_EXTENT / areaLightDist;
 #else
         // hard shadows
         // use the directional light
@@ -222,7 +311,7 @@ void HitPrimary(inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         shadeConstants.sunDirection,
         shadeConstants.sunColor,
         shadow);
-//outputColor = float3(shadow, shadow, shadow);
+outputColor = float3(shadow, shadow, shadow);
 
     payload.color += outputColor;
 }

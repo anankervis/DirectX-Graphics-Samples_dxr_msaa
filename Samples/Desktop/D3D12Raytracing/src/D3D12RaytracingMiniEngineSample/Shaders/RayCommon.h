@@ -167,14 +167,12 @@ struct BeamHitAttribs
     uint triID;
 };
 
-#if SHADOW_MODE == SHADOW_MODE_BEAM
 struct ShadowAABBPayload
 {
     float3 min;
     float3 max;
     float3 opacity; // projection along major axes
 };
-#endif
 
 #ifdef HLSL
 

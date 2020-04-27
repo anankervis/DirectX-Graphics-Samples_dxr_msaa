@@ -953,7 +953,6 @@ void DxrMsaaDemo::createAABBs(
                     indexData[t * 3 + 1],
                     indexData[t * 3 + 2],
                 };
-
                 const float *v[3] =
                 {
                     (const float*)(vertexData + mesh.vertexStride * i[0]),
@@ -968,6 +967,76 @@ void DxrMsaaDemo::createAABBs(
                 aabb.MaxY = max(aabb.MaxY, max(v[0][1], max(v[1][1], v[2][1])));
                 aabb.MaxZ = max(aabb.MaxZ, max(v[0][2], max(v[1][2], v[2][2])));
             }
+
+            ShadowAABBPayload payload;
+            // use the un-expanded AABB
+            payload.min = float3(
+                aabb.MinX,
+                aabb.MinY,
+                aabb.MinZ);
+            payload.max = float3(
+                aabb.MaxX,
+                aabb.MaxY,
+                aabb.MaxZ);
+            payload.opacity = float3(0, 0, 0);
+            for (uint32_t t = a * TRIS_PER_AABB; t < (a + 1) * TRIS_PER_AABB; t++)
+            {
+                uint32_t i[3] =
+                {
+                    indexData[t * 3 + 0],
+                    indexData[t * 3 + 1],
+                    indexData[t * 3 + 2],
+                };
+                const float *v[3] =
+                {
+                    (const float*)(vertexData + mesh.vertexStride * i[0]),
+                    (const float*)(vertexData + mesh.vertexStride * i[1]),
+                    (const float*)(vertexData + mesh.vertexStride * i[2]),
+                };
+
+                // We know the triangles are inside the AABB, because the AABB was fit against the triangles.
+                // So, we can skip clipping and assume the triangle is contained by the AABB.
+                auto calculateOpacity = [](
+                    float minA, float minB, float maxA, float maxB,
+                    float v0A, float v0B,
+                    float v1A, float v1B,
+                    float v2A, float v2B)
+                {
+                    // We know the triangles are inside the AABB, because the AABB was fit against the triangles.
+                    // So, we can skip clipping and assume the triangle is contained by the AABB.
+                    float e0A = v1A - v0A;
+                    float e0B = v1B - v0B;
+                    float e1A = v2A - v0A;
+                    float e1B = v2B - v0B;
+                    float areaTri = .5f * fabsf(e0A * e1B - e0B * e1A);
+
+                    float areaBox = (maxA - minA) * (maxB - minB);
+
+                    float areaPercent = areaTri / areaBox;
+                    return areaPercent;
+                };
+
+                payload.opacity.x += calculateOpacity(
+                    aabb.MinY, aabb.MinZ, aabb.MaxY, aabb.MaxZ,
+                    v[0][1], v[0][2],
+                    v[1][1], v[1][2],
+                    v[2][1], v[2][2]);
+
+                payload.opacity.y += calculateOpacity(
+                    aabb.MinX, aabb.MinZ, aabb.MaxX, aabb.MaxZ,
+                    v[0][0], v[0][2],
+                    v[1][0], v[1][2],
+                    v[2][0], v[2][2]);
+
+                payload.opacity.z += calculateOpacity(
+                    aabb.MinX, aabb.MinY, aabb.MaxX, aabb.MaxY,
+                    v[0][0], v[0][1],
+                    v[1][0], v[1][1],
+                    v[2][0], v[2][1]);
+            }
+            payload.opacity.x = min(1.0f, payload.opacity.x);
+            payload.opacity.y = min(1.0f, payload.opacity.y);
+            payload.opacity.z = min(1.0f, payload.opacity.z);
 
 #if EMULATE_CONSERVATIVE_BEAMS_VIA_AABB_ENLARGEMENT
             float aabbPPointX = camForwardX < 0 ? aabb.MinX : aabb.MaxX;
@@ -1000,20 +1069,6 @@ void DxrMsaaDemo::createAABBs(
 #endif
 
             aabbs.push_back(aabb);
-
-            ShadowAABBPayload payload;
-            payload.min = float3(
-                aabb.MinX,
-                aabb.MinY,
-                aabb.MinZ);
-            payload.max = float3(
-                aabb.MaxX,
-                aabb.MaxY,
-                aabb.MaxZ);
-            payload.opacity = float3(
-                .05f,
-                .05f,
-                .05f);
             aabbPayload.push_back(payload);
         }
     }
